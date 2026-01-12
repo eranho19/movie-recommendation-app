@@ -15,17 +15,20 @@ interface FilterPanelProps {
 export default function FilterPanel({ genres, filters, onFilterChange, onSuggest }: FilterPanelProps) {
   const [isOpen, setIsOpen] = useState(true);
   
-  // Generate year ranges from 1920 to current year in 10-year increments
+  // Generate year options from 1920 to 2020 in 10-year increments, plus "Current"
   const currentYear = new Date().getFullYear();
-  const yearRanges: { label: string; from: number; to: number }[] = [];
-  for (let year = 1920; year <= currentYear; year += 10) {
-    const endYear = Math.min(year + 9, currentYear);
-    yearRanges.push({
-      label: `${year} - ${endYear}`,
-      from: year,
-      to: endYear
+  const yearOptions: { label: string; value: number | 'current' }[] = [];
+  for (let year = 1920; year <= 2020; year += 10) {
+    yearOptions.push({
+      label: year.toString(),
+      value: year
     });
   }
+  // Add "Current" option which represents the current year
+  yearOptions.push({
+    label: 'Current',
+    value: 'current'
+  });
 
   const handleGenreToggle = (genreId: number) => {
     const newGenres = filters.genres.includes(genreId)
@@ -61,14 +64,21 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
     onFilterChange({ ...filters, streamingProviders: newProviders });
   };
 
-  const handleYearRangeChange = (value: string) => {
+  const handleFromYearChange = (value: string) => {
     if (value === '') {
-      onFilterChange({ ...filters, fromYear: undefined, toYear: undefined });
+      onFilterChange({ ...filters, fromYear: undefined });
     } else {
-      const range = yearRanges.find(r => `${r.from}-${r.to}` === value);
-      if (range) {
-        onFilterChange({ ...filters, fromYear: range.from, toYear: range.to });
-      }
+      const yearValue = value === 'current' ? currentYear : parseInt(value, 10);
+      onFilterChange({ ...filters, fromYear: yearValue });
+    }
+  };
+
+  const handleToYearChange = (value: string) => {
+    if (value === '') {
+      onFilterChange({ ...filters, toYear: undefined });
+    } else {
+      const yearValue = value === 'current' ? currentYear : parseInt(value, 10);
+      onFilterChange({ ...filters, toYear: yearValue });
     }
   };
 
@@ -248,21 +258,41 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
             <Calendar className="w-5 h-5 text-imdb-yellow" />
             <h3 className="font-semibold text-imdb-text-primary">Release Year</h3>
           </div>
-          <select
-            value={filters.fromYear && filters.toYear ? `${filters.fromYear}-${filters.toYear}` : ''}
-            onChange={(e) => handleYearRangeChange(e.target.value)}
-            className="w-full bg-imdb-bg border border-imdb-border text-imdb-text-primary rounded-md px-3 py-2 focus:outline-none focus:border-imdb-yellow transition-colors"
-          >
-            <option value="">All Years</option>
-            {yearRanges.map(range => (
-              <option key={`${range.from}-${range.to}`} value={`${range.from}-${range.to}`}>
-                {range.label}
-              </option>
-            ))}
-          </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-imdb-text-secondary mb-1">From</label>
+              <select
+                value={filters.fromYear === undefined ? '' : (filters.fromYear === currentYear ? 'current' : filters.fromYear.toString())}
+                onChange={(e) => handleFromYearChange(e.target.value)}
+                className="w-full bg-imdb-bg border border-imdb-border text-imdb-text-primary rounded-md px-3 py-2 focus:outline-none focus:border-imdb-yellow transition-colors"
+              >
+                <option value="">Any</option>
+                {yearOptions.map(option => (
+                  <option key={`from-${option.value}`} value={option.value.toString()}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-imdb-text-secondary mb-1">To</label>
+              <select
+                value={filters.toYear === undefined ? '' : (filters.toYear === currentYear ? 'current' : filters.toYear.toString())}
+                onChange={(e) => handleToYearChange(e.target.value)}
+                className="w-full bg-imdb-bg border border-imdb-border text-imdb-text-primary rounded-md px-3 py-2 focus:outline-none focus:border-imdb-yellow transition-colors"
+              >
+                <option value="">Any</option>
+                {yearOptions.map(option => (
+                  <option key={`to-${option.value}`} value={option.value.toString()}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <p className="text-xs text-imdb-text-secondary mt-2">
-            {filters.fromYear && filters.toYear
-              ? `Showing movies from ${filters.fromYear} to ${filters.toYear}`
+            {filters.fromYear !== undefined || filters.toYear !== undefined
+              ? `Showing movies from ${filters.fromYear !== undefined ? filters.fromYear : 'any year'} to ${filters.toYear !== undefined ? filters.toYear : 'any year'}`
               : 'Filter movies by release year range'}
           </p>
         </div>
