@@ -27,14 +27,24 @@ export function generateCombinationsPerProvider(
     const tmdbProviderId = providerMap[providerId];
     console.log(`Checking provider ${providerId} (TMDB ID: ${tmdbProviderId})`);
     
+    // Debug: Show sample of availableOn data
+    const sampleMovies = movies.slice(0, 3).filter(m => m.availableOn && m.availableOn.length > 0);
+    if (sampleMovies.length > 0) {
+      console.log(`Sample availableOn data:`, sampleMovies.map(m => ({ 
+        title: m.title, 
+        availableOn: m.availableOn 
+      })));
+    }
+    
     // Filter movies available on this provider that haven't been used yet
+    // Note: availableOn contains strings, tmdbProviderId is a number, so convert to string
     const providerMovies = movies.filter(m => 
       m.availableOn && 
       m.availableOn.includes(String(tmdbProviderId)) &&
       !globalUsedMovieIds.has(m.id) // Exclude already used movies
     );
     
-    console.log(`Found ${providerMovies.length} unused movies available on ${providerId}`);
+    console.log(`Found ${providerMovies.length} unused movies available on ${providerId} (looking for provider ID: "${String(tmdbProviderId)}")`);
     
     // If no movies match the provider filter, try using all unused movies
     const unusedMovies = movies.filter(m => !globalUsedMovieIds.has(m.id));
