@@ -14,6 +14,11 @@ export async function testSupabaseConnection() {
   
   console.log('✅ Supabase is configured');
   
+  if (!supabase) {
+    console.log('❌ Supabase client is null');
+    return { success: false, reason: 'Client not initialized' };
+  }
+  
   // Test 1: Check authentication
   try {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -39,7 +44,12 @@ export async function testSupabaseConnection() {
     console.log('✅ User found:', user.id);
     console.log('   Is anonymous:', user.is_anonymous);
     return { success: true, userId: user.id, isAnonymous: user.is_anonymous };
-  } catch (error) {
+  } catch (error: any) {
+    // Ignore AbortError - it's usually harmless
+    if (error?.name === 'AbortError' || error?.message === 'signal is aborted without reason') {
+      console.log('⚠️ Auth request was aborted (this is usually harmless)');
+      return { success: false, reason: 'Request aborted', error };
+    }
     console.log('❌ Auth test failed:', error);
     return { success: false, reason: 'Auth test failed', error };
   }
@@ -48,7 +58,7 @@ export async function testSupabaseConnection() {
 export async function testSupabaseTable() {
   console.log('=== Supabase Table Test ===');
   
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !supabase) {
     return { success: false, reason: 'Not configured' };
   }
   
@@ -90,7 +100,7 @@ export async function testSupabaseTable() {
 export async function testSupabaseWrite(movieId: number = 999999) {
   console.log('=== Supabase Write Test ===');
   
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !supabase) {
     return { success: false, reason: 'Not configured' };
   }
   

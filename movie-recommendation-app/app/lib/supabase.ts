@@ -8,7 +8,13 @@ let supabaseInstance: SupabaseClient | null = null;
 
 if (supabaseUrl && supabaseAnonKey) {
   try {
-    supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
+    supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+      },
+    });
   } catch (error) {
     console.warn('Failed to create Supabase client:', error);
   }
@@ -16,7 +22,8 @@ if (supabaseUrl && supabaseAnonKey) {
   console.warn('Supabase credentials not found. Using localStorage fallback.');
 }
 
-export const supabase = supabaseInstance as SupabaseClient;
+// Create a safe wrapper that checks if client exists
+export const supabase: SupabaseClient | null = supabaseInstance;
 
 export const isSupabaseConfigured = () => {
   return Boolean(supabaseInstance);
