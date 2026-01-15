@@ -38,6 +38,10 @@ export async function discoverMovies(params: {
   'vote_average.lte'?: number;
   sort_by?: string;
   page?: number;
+  with_watch_providers?: string;
+  watch_region?: string;
+  'primary_release_date.gte'?: string;
+  'primary_release_date.lte'?: string;
 }) {
   return fetchFromTMDB('/discover/movie', {
     ...params,
@@ -162,6 +166,8 @@ export async function discoverMoviesWithProviders(params: {
   page?: number;
   with_watch_providers?: string;
   watch_region?: string;
+  'primary_release_date.gte'?: string;
+  'primary_release_date.lte'?: string;
 }, limit: number = 100) {
   // Fetch multiple pages to get enough movies
   const promises = [];
@@ -185,7 +191,13 @@ export async function discoverMoviesWithProviders(params: {
       ]);
       
       // Get flatrate (free with subscription) providers
-      const availableOn = providers?.flatrate?.map((p: any) => p.provider_id) || [];
+      // Convert to strings to match the type definition and enable proper comparison
+      const availableOn = providers?.flatrate?.map((p: any) => String(p.provider_id)) || [];
+      
+      // Debug logging for provider data (only log first few to avoid spam)
+      if (i < 3 && availableOn.length > 0) {
+        console.log(`Movie "${allMovies[i].title}" available on providers:`, availableOn);
+      }
       
       moviesWithInfo.push({
         ...allMovies[i],
