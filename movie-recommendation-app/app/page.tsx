@@ -182,9 +182,42 @@ export default function Home() {
     setSelectedMovie(movie);
   };
 
-  const handleMovieWatchedChange = () => {
-    // Trigger a re-fetch by updating the seed
-    setCombinationSeed(prev => prev + 1);
+  const handleMovieWatchedChange = async (movieId: number) => {
+    // Don't refresh the entire search - just replace the marked movie
+    if (isCombinationMode && movieCombinations.length > 0) {
+      // Find which combination contains this movie
+      const combinationIndex = movieCombinations.findIndex(combo => 
+        combo.movies.some(m => m.id === movieId)
+      );
+      
+      if (combinationIndex !== -1) {
+        // Use existing replace logic for combinations
+        handleReplaceMovie(combinationIndex, movieId);
+      }
+    } else {
+      // For list view, try to replace with another movie from available pool
+      const movieToReplace = filteredMovies.find(m => m.id === movieId);
+      if (movieToReplace) {
+        // Get all currently displayed movie IDs (excluding the one being replaced)
+        const displayedMovieIds = filteredMovies
+          .filter(m => m.id !== movieId)
+          .map(m => m.id);
+        
+        // Find a replacement from the available movies pool
+        // Use movies array as the source, excluding already displayed movies
+        const replacement = findReplacementMovie(movieToReplace, movies, displayedMovieIds);
+        
+        if (replacement) {
+          // Replace the movie in filteredMovies only
+          setFilteredMovies(prev => prev.map(m => m.id === movieId ? replacement : m));
+          console.log(`Replaced "${movieToReplace.title}" with "${replacement.title}" in list view`);
+        } else {
+          // No replacement found, just remove it from the filtered list
+          setFilteredMovies(prev => prev.filter(m => m.id !== movieId));
+          console.log(`Removed "${movieToReplace.title}" from list (no suitable replacement found)`);
+        }
+      }
+    }
   };
 
   const handleRequestAnotherSearch = () => {

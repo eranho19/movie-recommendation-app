@@ -6,13 +6,16 @@ const TABLE_NAME = 'watched_movies';
 
 // Helper function to get user ID (you can customize this based on your auth setup)
 async function getUserId(): Promise<string | null> {
-  if (!isSupabaseConfigured()) return null;
+  if (!isSupabaseConfigured() || !supabase) return null;
   
   try {
     const { data: { user } } = await supabase.auth.getUser();
     return user?.id || null;
-  } catch (error) {
-    console.error('Error getting user:', error);
+  } catch (error: any) {
+    // Ignore AbortError - it's usually harmless
+    if (error?.name !== 'AbortError' && error?.message !== 'signal is aborted without reason') {
+      console.error('Error getting user:', error);
+    }
     return null;
   }
 }
@@ -46,7 +49,7 @@ export async function getWatchedMovies(): Promise<WatchedMovie[]> {
   }
 
   const userId = await getUserId();
-  if (!userId) {
+  if (!userId || !supabase) {
     return getWatchedMoviesFromLocalStorage();
   }
 
@@ -122,6 +125,26 @@ export async function markMovieAsWatched(movieId: number, mightWatchAgain: boole
     return;
   }
 
+  if (!supabase) {
+    console.warn('[markMovieAsWatched] Supabase client not available, using localStorage');
+    const watched = getWatchedMoviesFromLocalStorage();
+    const existing = watched.find(m => m.id === movieId);
+    
+    if (existing) {
+      existing.mightWatchAgain = mightWatchAgain;
+      existing.watchedAt = new Date().toISOString();
+    } else {
+      watched.push({
+        id: movieId,
+        watchedAt: new Date().toISOString(),
+        mightWatchAgain,
+      });
+    }
+    
+    saveWatchedMoviesToLocalStorage(watched);
+    return;
+  }
+
   try {
     console.log(`[markMovieAsWatched] Attempting to save to Supabase...`);
     console.log(`[markMovieAsWatched] Data:`, {
@@ -153,6 +176,26 @@ export async function markMovieAsWatched(movieId: number, mightWatchAgain: boole
     console.log(`[markMovieAsWatched] ✅ SUCCESS! Movie ${movieId} saved to Supabase`);
     console.log(`[markMovieAsWatched] Response data:`, data);
   } catch (error: any) {
+    // Ignore AbortError - it's usually harmless
+    if (error?.name === 'AbortError' || error?.message === 'signal is aborted without reason') {
+      console.warn('[markMovieAsWatched] Request aborted, using localStorage fallback');
+      const watched = getWatchedMoviesFromLocalStorage();
+      const existing = watched.find(m => m.id === movieId);
+      
+      if (existing) {
+        existing.mightWatchAgain = mightWatchAgain;
+        existing.watchedAt = new Date().toISOString();
+      } else {
+        watched.push({
+          id: movieId,
+          watchedAt: new Date().toISOString(),
+          mightWatchAgain,
+        });
+      }
+      
+      saveWatchedMoviesToLocalStorage(watched);
+      return;
+    }
     console.error('[markMovieAsWatched] ❌ Error marking movie as watched in Supabase:', error);
     
     // Show user-friendly error in console
@@ -186,7 +229,7 @@ export async function markMovieAsWatched(movieId: number, mightWatchAgain: boole
 }
 
 export async function unmarkMovieAsWatched(movieId: number): Promise<void> {
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() || !supabase) {
     const watched = getWatchedMoviesFromLocalStorage();
     const filtered = watched.filter(m => m.id !== movieId);
     saveWatchedMoviesToLocalStorage(filtered);
