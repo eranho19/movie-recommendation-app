@@ -7,9 +7,10 @@ import ViewToggle from './components/ViewToggle';
 import MovieCard from './components/MovieCard';
 import MovieCombinationCard from './components/MovieCombinationCard';
 import MoviePreviewModal from './components/MoviePreviewModal';
-import { Loader2, AlertCircle, RefreshCw, Film, Star, Tv, Calendar } from 'lucide-react';
+import { AlertCircle, RefreshCw, Film, Star, Tv, Calendar } from 'lucide-react';
+import LoadingAnimation from './components/LoadingAnimation';
 import type { Movie, Filters, ViewMode, Genre, MovieCombination, MovieWithProvider } from './types/movie';
-import { STREAMING_PROVIDERS } from './types/movie';
+import { STREAMING_PROVIDERS, LANGUAGE_OPTIONS } from './types/movie';
 import { getGenres, discoverMoviesWithProviders, getCombinedRating } from './lib/tmdb';
 import { generateMovieCombinations, generateCombinationsPerProvider, findReplacementMovie } from './lib/combinations';
 import { shouldExcludeMovie } from './lib/storage';
@@ -30,6 +31,7 @@ export default function Home() {
     tags: [],
     minScore: 0,
     language: 'all',
+    internationalLanguages: undefined,
     totalTime: undefined,
     streamingProviders: [],
     fromYear: undefined,
@@ -54,44 +56,47 @@ export default function Home() {
   useEffect(() => {
     if (!shouldFetchMovies) return;
     
+    // Capture filters at the time of fetch to avoid race conditions
+    const currentFilters = filters;
+    
     const fetchMovies = async () => {
       setLoading(true);
       setError(null);
       try {
         const params: any = {
           sort_by: 'vote_average.desc',
-          'vote_average.gte': filters.minScore,
+          'vote_average.gte': currentFilters.minScore,
           watch_region: 'US',
         };
 
         // Add genre filter
-        if (filters.genres.length > 0) {
-          params.with_genres = filters.genres.join(',');
+        if (currentFilters.genres.length > 0) {
+          params.with_genres = currentFilters.genres.join(',');
         }
 
         // Add language filter - International means NOT English
-        if (filters.language === 'english') {
+        if (currentFilters.language === 'english') {
           params.with_original_language = 'en';
-        } else if (filters.language === 'international') {
+        } else if (currentFilters.language === 'international') {
           // For international, we need to fetch all and filter out English
           // TMDB doesn't support "NOT" operator directly in this param
           params.with_original_language = ''; // We'll filter after
         }
 
         // Add streaming provider filter
-        if (filters.streamingProviders.length > 0) {
-          const providerIds = filters.streamingProviders
+        if (currentFilters.streamingProviders.length > 0) {
+          const providerIds = currentFilters.streamingProviders
             .map(id => STREAMING_PROVIDERS.find(p => p.id === id)?.tmdbId)
             .filter(id => id !== undefined);
           params.with_watch_providers = providerIds.join('|');
         }
 
         // Add year range filter
-        if (filters.fromYear) {
-          params['primary_release_date.gte'] = `${filters.fromYear}-01-01`;
+        if (currentFilters.fromYear) {
+          params['primary_release_date.gte'] = `${currentFilters.fromYear}-01-01`;
         }
-        if (filters.toYear) {
-          params['primary_release_date.lte'] = `${filters.toYear}-12-31`;
+        if (currentFilters.toYear) {
+          params['primary_release_date.lte'] = `${currentFilters.toYear}-12-31`;
         }
 
         // Fetch movies with runtime and provider information
@@ -99,10 +104,78 @@ export default function Home() {
         const moviesData = await discoverMoviesWithProviders(params, 150);
         console.log(`Fetched ${moviesData.length} movies from TMDB`);
         
-        // Filter out English if international is selected
+        // Filter by language
         let results = moviesData;
-        if (filters.language === 'international') {
+        if (currentFilters.language === 'international') {
+          // Filter out English
           results = results.filter((movie: MovieWithProvider) => movie.original_language !== 'en');
+          
+          // If specific languages are selected, filter by those
+          if (currentFilters.internationalLanguages && currentFilters.internationalLanguages.length > 0) {
+            const selectedLanguageCodes = currentFilters.internationalLanguages
+              .map(langId => {
+                const langOption = LANGUAGE_OPTIONS.find(l => l.id === langId);
+                return langOption?.code;
+              })
+              .filter(code => code !== undefined && code !== '');
+            
+            // If "Other" is selected, include languages not in the specific list
+            const hasOther = currentFilters.internationalLanguages.includes('other');
+            const specificCodes = selectedLanguageCodes.filter(code => code !== '');
+            
+            if (hasOther && specificCodes.length > 0) {
+              // Include specific languages OR languages not in the list
+              results = results.filter((movie: MovieWithProvider) => {
+                const lang = movie.original_language;
+                return specificCodes.includes(lang) || !LANGUAGE_OPTIONS.some(l => l.code === lang && l.code !== '');
+              });
+            } else if (hasOther) {
+              // Only "Other" selected - show languages not in the specific list
+              results = results.filter((movie: MovieWithProvider) => {
+                const lang = movie.original_language;
+                return !LANGUAGE_OPTIONS.some(l => l.code === lang && l.code !== '');
+              });
+            } else if (specificCodes.length > 0) {
+              // Only specific languages selected
+              results = results.filter((movie: MovieWithProvider) => 
+                specificCodes.includes(movie.original_language)
+              );
+            }
+          }
+        } else if (currentFilters.language === 'all') {
+          // For "All", if specific international languages are selected, filter to English + those languages
+          if (currentFilters.internationalLanguages && currentFilters.internationalLanguages.length > 0) {
+            const selectedLanguageCodes = currentFilters.internationalLanguages
+              .map(langId => {
+                const langOption = LANGUAGE_OPTIONS.find(l => l.id === langId);
+                return langOption?.code;
+              })
+              .filter(code => code !== undefined && code !== '');
+            
+            // If "Other" is selected, include languages not in the specific list
+            const hasOther = currentFilters.internationalLanguages.includes('other');
+            const specificCodes = selectedLanguageCodes.filter(code => code !== '');
+            
+            if (hasOther && specificCodes.length > 0) {
+              // Include English OR specific languages OR languages not in the list
+              results = results.filter((movie: MovieWithProvider) => {
+                const lang = movie.original_language;
+                return lang === 'en' || specificCodes.includes(lang) || !LANGUAGE_OPTIONS.some(l => l.code === lang && l.code !== '');
+              });
+            } else if (hasOther) {
+              // Only "Other" selected - show English OR languages not in the specific list
+              results = results.filter((movie: MovieWithProvider) => {
+                const lang = movie.original_language;
+                return lang === 'en' || !LANGUAGE_OPTIONS.some(l => l.code === lang && l.code !== '');
+              });
+            } else if (specificCodes.length > 0) {
+              // Only specific languages selected - show English OR those languages
+              results = results.filter((movie: MovieWithProvider) => 
+                movie.original_language === 'en' || specificCodes.includes(movie.original_language)
+              );
+            }
+            // If no specific languages selected, show all (no filtering needed)
+          }
         }
         console.log(`After language filter: ${results.length} movies`);
         
@@ -120,26 +193,79 @@ export default function Home() {
         
         console.log(`Total movies after filters: ${results.length}, Unique movies: ${uniqueMovies.length}`);
         
-        // Sort by combined rating
-        const sortedMovies = uniqueMovies.sort((a: MovieWithProvider, b: MovieWithProvider) => {
-          const ratingA = getCombinedRating(a.vote_average);
-          const ratingB = getCombinedRating(b.vote_average);
-          return ratingB - ratingA;
-        });
+        // Sort and interleave movies based on language preference
+        let sortedMovies: MovieWithProvider[];
+        
+        if (currentFilters.language === 'all' && currentFilters.internationalLanguages && currentFilters.internationalLanguages.length > 0) {
+          // Separate English and International movies
+          const englishMovies = uniqueMovies.filter((movie: MovieWithProvider) => movie.original_language === 'en');
+          const internationalMovies = uniqueMovies.filter((movie: MovieWithProvider) => movie.original_language !== 'en');
+          
+          // Sort each group by combined rating
+          englishMovies.sort((a: MovieWithProvider, b: MovieWithProvider) => {
+            const ratingA = getCombinedRating(a.vote_average);
+            const ratingB = getCombinedRating(b.vote_average);
+            return ratingB - ratingA;
+          });
+          
+          internationalMovies.sort((a: MovieWithProvider, b: MovieWithProvider) => {
+            const ratingA = getCombinedRating(a.vote_average);
+            const ratingB = getCombinedRating(b.vote_average);
+            return ratingB - ratingA;
+          });
+          
+          // Interleave: English first, then International, then alternate
+          sortedMovies = [];
+          
+          // First result is always English (if available)
+          if (englishMovies.length > 0) {
+            sortedMovies.push(englishMovies[0]);
+          }
+          
+          // Second result is International (if available)
+          if (internationalMovies.length > 0) {
+            sortedMovies.push(internationalMovies[0]);
+          }
+          
+          // Then alternate: English, International, English, International...
+          let englishIndex = 1; // Start from index 1 since we already added index 0
+          let internationalIndex = 1; // Start from index 1 since we already added index 0
+          
+          // Alternate between English and International
+          while (englishIndex < englishMovies.length || internationalIndex < internationalMovies.length) {
+            // Add English if available
+            if (englishIndex < englishMovies.length) {
+              sortedMovies.push(englishMovies[englishIndex++]);
+            }
+            // Add International if available
+            if (internationalIndex < internationalMovies.length) {
+              sortedMovies.push(internationalMovies[internationalIndex++]);
+            }
+          }
+          
+          console.log(`Sorted with interleaving: ${englishMovies.length} English, ${internationalMovies.length} International`);
+        } else {
+          // Default sorting by combined rating
+          sortedMovies = uniqueMovies.sort((a: MovieWithProvider, b: MovieWithProvider) => {
+            const ratingA = getCombinedRating(a.vote_average);
+            const ratingB = getCombinedRating(b.vote_average);
+            return ratingB - ratingA;
+          });
+        }
 
         setMovies(sortedMovies);
         setFilteredMovies(sortedMovies);
         
         // Generate combinations if totalTime is set
-        if (filters.totalTime && filters.totalTime > 0) {
+        if (currentFilters.totalTime && currentFilters.totalTime > 0) {
           let combinations: MovieCombination[] = [];
           
-          console.log(`Generating combinations for ${filters.totalTime} hours from ${sortedMovies.length} movies`);
+          console.log(`Generating combinations for ${currentFilters.totalTime} hours from ${sortedMovies.length} movies`);
           
-          if (filters.streamingProviders.length > 0) {
+          if (currentFilters.streamingProviders.length > 0) {
             // Generate 3 combinations per provider
             const providerMap: { [id: string]: number } = {};
-            filters.streamingProviders.forEach(id => {
+            currentFilters.streamingProviders.forEach(id => {
               const provider = STREAMING_PROVIDERS.find(p => p.id === id);
               if (provider) {
                 providerMap[id] = provider.tmdbId;
@@ -148,13 +274,13 @@ export default function Home() {
             console.log('Provider map:', providerMap);
             combinations = generateCombinationsPerProvider(
               sortedMovies,
-              filters.totalTime,
-              filters.streamingProviders,
+              currentFilters.totalTime,
+              currentFilters.streamingProviders,
               providerMap
             );
           } else {
             // Generate 5 general combinations
-            combinations = generateMovieCombinations(sortedMovies, filters.totalTime, 5);
+            combinations = generateMovieCombinations(sortedMovies, currentFilters.totalTime, 5);
           }
           
           console.log(`Final combinations count: ${combinations.length}`);
@@ -165,13 +291,19 @@ export default function Home() {
       } catch (err) {
         console.error('Error fetching movies:', err);
         setError('Failed to load movies. Please check your API key in .env.local file.');
+        // Don't clear filters on error - preserve user selections
       } finally {
         setLoading(false);
+        // Reset the fetch flag after completion (success or error)
+        setShouldFetchMovies(false);
       }
     };
 
     fetchMovies();
-  }, [shouldFetchMovies, filters, combinationSeed]);
+    // Only depend on shouldFetchMovies and combinationSeed, not filters
+    // Filters are captured at the start of the effect to avoid race conditions
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldFetchMovies, combinationSeed]);
 
   const handleFilterChange = (newFilters: Filters) => {
     setFilters(newFilters);
@@ -267,6 +399,8 @@ export default function Home() {
   };
 
   const handleSuggestMovies = () => {
+    // Reset error and ensure we fetch with current filters
+    setError(null);
     setShouldFetchMovies(true);
   };
 
@@ -338,11 +472,7 @@ export default function Home() {
         )}
 
         {/* Loading State */}
-        {loading && (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-12 h-12 text-imdb-yellow animate-spin" />
-          </div>
-        )}
+        {loading && <LoadingAnimation />}
 
         {/* Movies Grid/List or Combinations */}
         {shouldFetchMovies && !loading && !error && isCombinationMode && movieCombinations.length === 0 && (

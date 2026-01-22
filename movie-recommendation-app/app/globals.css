@@ -53,6 +53,16 @@ select:focus {
   outline-offset: 2px;
 }
 
+/* Loading Animation - Revolving 3D Armchair */
+@keyframes revolveChair {
+  from {
+    transform: translateX(-50%) rotateY(0deg);
+  }
+  to {
+    transform: translateX(-50%) rotateY(360deg);
+  }
+}
+
 
 
 

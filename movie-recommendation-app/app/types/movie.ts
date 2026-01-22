@@ -49,16 +49,31 @@ export interface Video {
   official: boolean;
 }
 
+export type LanguageOption = 'spanish' | 'french' | 'russian' | 'korean' | 'indian' | 'hebrew' | 'arabic' | 'turkish' | 'other';
+
 export interface Filters {
   genres: number[];
   tags: string[];
   minScore: number;
   language: 'english' | 'international' | 'all';
+  internationalLanguages?: LanguageOption[]; // Selected languages when international is chosen
   totalTime?: number; // Total time in hours for movie combinations
   streamingProviders: string[]; // Selected streaming providers
   fromYear?: number; // Starting year for release date filter
   toYear?: number; // Ending year for release date filter
 }
+
+export const LANGUAGE_OPTIONS: { id: LanguageOption; name: string; code: string }[] = [
+  { id: 'spanish', name: 'Spanish', code: 'es' },
+  { id: 'french', name: 'French', code: 'fr' },
+  { id: 'russian', name: 'Russian', code: 'ru' },
+  { id: 'korean', name: 'Korean', code: 'ko' },
+  { id: 'indian', name: 'Indian', code: 'hi' }, // Hindi as primary, but covers Indian languages
+  { id: 'hebrew', name: 'Hebrew', code: 'he' },
+  { id: 'arabic', name: 'Arabic', code: 'ar' },
+  { id: 'turkish', name: 'Turkish', code: 'tr' },
+  { id: 'other', name: 'Other', code: '' }, // Will match any language not in the list above
+];
 
 export type StreamingProvider = 'Netflix' | 'Prime' | 'Hulu' | 'Paramount' | 'HBO' | 'Disney' | 'Tubi' | 'Peacock' | 'AppleTV';
 

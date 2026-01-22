@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { Film, Tag, Star, Globe, X, Filter, Clock, Tv, Calendar, AlertCircle } from 'lucide-react';
-import type { Filters, Genre } from '../types/movie';
-import { GENRE_TAGS, STREAMING_PROVIDERS } from '../types/movie';
+import type { Filters, Genre, LanguageOption } from '../types/movie';
+import { GENRE_TAGS, STREAMING_PROVIDERS, LANGUAGE_OPTIONS } from '../types/movie';
+import { playClickSound } from '../lib/sounds';
 
 interface FilterPanelProps {
   genres: Genre[];
@@ -31,14 +32,29 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
   });
 
   const handleGenreToggle = (genreId: number) => {
-    const newGenres = filters.genres.includes(genreId)
-      ? filters.genres.filter(id => id !== genreId)
-      : [...filters.genres, genreId];
+    playClickSound();
+    
+    // If clicking the same genre that's already selected, deselect it (re-enable multi-select)
+    if (filters.genres.includes(genreId) && filters.genres.length === 1) {
+      const newGenres: number[] = [];
+      onFilterChange({ ...filters, genres: newGenres, tags: [] });
+      return;
+    }
+    
+    // If a genre is already selected, replace it with the new one (single-select mode)
+    // Otherwise, add to the list (multi-select mode when none selected)
+    const newGenres = filters.genres.length > 0 && !filters.genres.includes(genreId)
+      ? [genreId] // Single-select: replace with new selection
+      : filters.genres.includes(genreId)
+        ? filters.genres.filter(id => id !== genreId) // Deselect if already selected
+        : [...filters.genres, genreId]; // Add if none selected (multi-select mode)
+    
     // Clear tags when genres change as they're genre-specific
     onFilterChange({ ...filters, genres: newGenres, tags: [] });
   };
 
   const handleTagToggle = (tagId: string) => {
+    playClickSound();
     const newTags = filters.tags.includes(tagId)
       ? filters.tags.filter(id => id !== tagId)
       : [...filters.tags, tagId];
@@ -46,18 +62,38 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
   };
 
   const handleMinScoreChange = (value: number) => {
+    playClickSound();
     onFilterChange({ ...filters, minScore: value });
   };
 
   const handleLanguageChange = (language: 'english' | 'international' | 'all') => {
-    onFilterChange({ ...filters, language });
+    playClickSound();
+    // Keep international languages when switching to 'all' or 'international'
+    // Only clear when switching to 'english'
+    const updatedFilters: Filters = {
+      ...filters,
+      language,
+      ...(language === 'english' ? { internationalLanguages: undefined } : {})
+    };
+    onFilterChange(updatedFilters);
+  };
+
+  const handleInternationalLanguageToggle = (languageId: LanguageOption) => {
+    playClickSound();
+    const currentLanguages = filters.internationalLanguages || [];
+    const newLanguages = currentLanguages.includes(languageId)
+      ? currentLanguages.filter(id => id !== languageId)
+      : [...currentLanguages, languageId];
+    onFilterChange({ ...filters, internationalLanguages: newLanguages.length > 0 ? newLanguages : undefined });
   };
 
   const handleTotalTimeChange = (value: number) => {
+    playClickSound();
     onFilterChange({ ...filters, totalTime: value });
   };
 
   const handleProviderToggle = (providerId: string) => {
+    playClickSound();
     const newProviders = filters.streamingProviders.includes(providerId)
       ? filters.streamingProviders.filter(id => id !== providerId)
       : [...filters.streamingProviders, providerId];
@@ -65,6 +101,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
   };
 
   const handleFromYearChange = (value: string) => {
+    playClickSound();
     if (value === '') {
       onFilterChange({ ...filters, fromYear: undefined });
     } else {
@@ -74,6 +111,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
   };
 
   const handleToYearChange = (value: string) => {
+    playClickSound();
     if (value === '') {
       onFilterChange({ ...filters, toYear: undefined });
     } else {
@@ -83,11 +121,13 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
   };
 
   const clearFilters = () => {
+    playClickSound();
     onFilterChange({
       genres: [],
       tags: [],
       minScore: 0,
       language: 'all',
+      internationalLanguages: undefined,
       totalTime: undefined,
       streamingProviders: [],
       fromYear: undefined,
@@ -110,6 +150,8 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
     filters.tags.length > 0 || 
     filters.minScore > 0 || 
     filters.language !== 'all' ||
+    (filters.language === 'all' && filters.internationalLanguages && filters.internationalLanguages.length > 0) ||
+    (filters.language === 'international' && filters.internationalLanguages && filters.internationalLanguages.length > 0) ||
     (filters.totalTime !== undefined && filters.totalTime > 0) ||
     filters.streamingProviders.length > 0 ||
     filters.fromYear !== undefined ||
@@ -139,7 +181,10 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
             </button>
           )}
           <button
-            onClick={() => setIsOpen(!isOpen)}
+            onClick={() => {
+              playClickSound();
+              setIsOpen(!isOpen);
+            }}
             className="text-imdb-yellow hover:text-yellow-400 text-sm md:hidden"
           >
             {isOpen ? 'Hide' : 'Show'}
@@ -156,20 +201,34 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
             <h3 className="font-semibold text-imdb-text-primary">Genres</h3>
           </div>
           <div className="flex flex-wrap gap-2">
-            {genres.map(genre => (
-              <button
-                key={genre.id}
-                onClick={() => handleGenreToggle(genre.id)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                  filters.genres.includes(genre.id)
-                    ? 'bg-imdb-yellow text-imdb-bg'
-                    : 'bg-imdb-bg text-imdb-text-secondary hover:bg-imdb-border'
-                }`}
-              >
-                {genre.name}
-              </button>
-            ))}
+            {genres.map(genre => {
+              const isSelected = filters.genres.includes(genre.id);
+              const isDisabled = filters.genres.length > 0 && !isSelected; // Disable if another genre is selected
+              
+              return (
+                <button
+                  key={genre.id}
+                  onClick={() => handleGenreToggle(genre.id)}
+                  disabled={isDisabled}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    isSelected
+                      ? 'bg-imdb-yellow text-imdb-bg'
+                      : isDisabled
+                        ? 'bg-imdb-bg text-imdb-text-secondary opacity-40 cursor-not-allowed'
+                        : 'bg-imdb-bg text-imdb-text-secondary hover:bg-imdb-border'
+                  }`}
+                  title={isDisabled ? 'Click the selected genre again to enable multi-select' : ''}
+                >
+                  {genre.name}
+                </button>
+              );
+            })}
           </div>
+          {filters.genres.length > 0 && (
+            <p className="text-xs text-imdb-text-secondary mt-2">
+              💡 Click the selected genre again to enable multi-select
+            </p>
+          )}
         </div>
 
         {/* Tags Filter - Only show when genres are selected */}
@@ -235,7 +294,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
             <Globe className="w-5 h-5 text-imdb-yellow" />
             <h3 className="font-semibold text-imdb-text-primary">Language</h3>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 mb-3">
             {(['all', 'english', 'international'] as const).map(lang => (
               <button
                 key={lang}
@@ -250,6 +309,43 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
               </button>
             ))}
           </div>
+          {/* Multi-language selection for International and All */}
+          {(filters.language === 'international' || filters.language === 'all') && (
+            <div className="mt-3 pt-3 border-t border-imdb-border">
+              <p className="text-xs text-imdb-text-secondary mb-2">
+                {filters.language === 'all' 
+                  ? 'Select specific international languages (English will always be included):'
+                  : 'Select specific languages:'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {LANGUAGE_OPTIONS.map(lang => {
+                  const isSelected = filters.internationalLanguages?.includes(lang.id) || false;
+                  return (
+                    <button
+                      key={lang.id}
+                      onClick={() => handleInternationalLanguageToggle(lang.id)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                        isSelected
+                          ? 'bg-imdb-yellow text-imdb-bg'
+                          : 'bg-imdb-bg text-imdb-text-secondary hover:bg-imdb-border'
+                      }`}
+                    >
+                      {lang.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-imdb-text-secondary mt-2">
+                {filters.internationalLanguages && filters.internationalLanguages.length > 0
+                  ? filters.language === 'all'
+                    ? `Selected: ${filters.internationalLanguages.length} international language(s) (English always included)`
+                    : `Selected: ${filters.internationalLanguages.length} language(s)`
+                  : filters.language === 'all'
+                    ? 'Select languages or leave empty to show all languages (English prioritized)'
+                    : 'Select languages or leave empty to show all non-English movies'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Year Range Filter */}
@@ -365,7 +461,10 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
         {/* Suggest Button */}
         <div className="pt-4 border-t border-imdb-border">
           <button
-            onClick={onSuggest}
+            onClick={() => {
+              playClickSound();
+              onSuggest();
+            }}
             className="w-full bg-imdb-yellow hover:bg-yellow-500 text-imdb-bg font-bold py-3 px-6 rounded-md text-lg transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
           >
             <Film className="w-6 h-6" />
