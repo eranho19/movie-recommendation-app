@@ -12,7 +12,7 @@ if (supabaseUrl && supabaseAnonKey) {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: false,
+        detectSessionInUrl: true, // Enable to detect session from URL
       },
     });
   } catch (error) {

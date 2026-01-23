@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
   const error = requestUrl.searchParams.get('error');
   const errorDescription = requestUrl.searchParams.get('error_description');
+  
+  // Log all query parameters for debugging
+  console.log('Callback route - Full URL:', requestUrl.toString());
+  console.log('Callback route - Query params:', Object.fromEntries(requestUrl.searchParams));
+  console.log('Callback route - Code:', code);
+  console.log('Callback route - Error:', error);
+  console.log('Callback route - All params:', {
+    code,
+    error,
+    errorDescription,
+    allParams: Object.fromEntries(requestUrl.searchParams)
+  });
 
   // Handle OAuth errors
   if (error) {
@@ -16,43 +27,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (code) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-    if (supabaseUrl && supabaseAnonKey) {
-      try {
-        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-          auth: {
-            persistSession: true,
-            autoRefreshToken: true,
-          },
-        });
-        
-        const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-        
-        if (exchangeError) {
-          console.error('Session Exchange Error:', exchangeError);
-          const loginUrl = new URL('/login', requestUrl.origin);
-          loginUrl.searchParams.set('error', exchangeError.message || 'Failed to create session');
-          return NextResponse.redirect(loginUrl);
-        }
-
-        // Success - redirect to home
-        return NextResponse.redirect(new URL('/', requestUrl.origin));
-      } catch (err: any) {
-        console.error('Callback Error:', err);
-        const loginUrl = new URL('/login', requestUrl.origin);
-        loginUrl.searchParams.set('error', err.message || 'Authentication error occurred');
-        return NextResponse.redirect(loginUrl);
-      }
-    } else {
-      const loginUrl = new URL('/login', requestUrl.origin);
-      loginUrl.searchParams.set('error', 'Supabase is not configured');
-      return NextResponse.redirect(loginUrl);
-    }
-  }
-
-  // No code provided - redirect to login
-  return NextResponse.redirect(new URL('/login', requestUrl.origin));
+  // Redirect to client-side handler with all query parameters preserved
+  // Supabase might pass the code in different formats, so we'll let the client handle it
+  const handlerUrl = new URL('/auth/callback-handler', requestUrl.origin);
+  
+  // Preserve all query parameters (code might be there, or Supabase might use different params)
+  requestUrl.searchParams.forEach((value, key) => {
+    handlerUrl.searchParams.set(key, value);
+  });
+  
+  console.log('Redirecting to handler with URL:', handlerUrl.toString());
+  return NextResponse.redirect(handlerUrl);
 }

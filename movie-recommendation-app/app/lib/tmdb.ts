@@ -190,9 +190,12 @@ export async function discoverMoviesWithProviders(params: {
         getMovieProviders(allMovies[i].id)
       ]);
       
-      // Get flatrate (free with subscription) providers
+      // Get both flatrate (subscription) and free (ad-supported) providers
+      // Tubi and other free services are in the 'free' array, not 'flatrate'
       // Convert to strings to match the type definition and enable proper comparison
-      const availableOn = providers?.flatrate?.map((p: any) => String(p.provider_id)) || [];
+      const flatrateProviders = providers?.flatrate?.map((p: any) => String(p.provider_id)) || [];
+      const freeProviders = providers?.free?.map((p: any) => String(p.provider_id)) || [];
+      const availableOn = [...flatrateProviders, ...freeProviders];
       
       // Debug logging for provider data (only log first few to avoid spam)
       if (i < 3 && availableOn.length > 0) {
