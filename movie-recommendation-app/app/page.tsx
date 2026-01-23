@@ -24,6 +24,8 @@ export default function Home() {
   const [movies, setMovies] = useState<MovieWithProvider[]>([]);
   const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
   const [movieCombinations, setMovieCombinations] = useState<MovieCombination[]>([]);
+  // Track replacement history: combinationIndex -> movieSlotIndex -> previously replaced movie IDs
+  const [replacementHistory, setReplacementHistory] = useState<Map<string, number[]>>(new Map());
   const [combinationSeed, setCombinationSeed] = useState(0);
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -289,8 +291,11 @@ export default function Home() {
           
           console.log(`Final combinations count: ${combinations.length}`);
           setMovieCombinations(combinations);
+          // Reset replacement history when new combinations are generated
+          setReplacementHistory(new Map());
         } else {
           setMovieCombinations([]);
+          setReplacementHistory(new Map());
         }
       } catch (err) {
         console.error('Error fetching movies:', err);
@@ -369,13 +374,24 @@ export default function Home() {
     const movieToReplace = combination.movies.find(m => m.id === movieId);
     if (!movieToReplace) return;
 
-    // Get all movie IDs in this combination (excluding the one to replace)
-    const usedMovieIds = combination.movies
-      .filter(m => m.id !== movieId)
-      .map(m => m.id);
-
+    // Find the index of the movie in the combination
+    const movieIndex = combination.movies.findIndex(m => m.id === movieId);
+    const historyKey = `${combinationIndex}-${movieIndex}`;
+    
+    // Get previously replaced movie IDs for this slot
+    const previouslyReplacedIds = replacementHistory.get(historyKey) || [];
+    
+    // Get all movie IDs from ALL combinations (excluding the one to replace)
+    // This ensures replacements are unique across all recommendations
+    const usedMovieIds = movieCombinations
+      .flatMap(combo => combo.movies.map(m => m.id))
+      .filter(id => id !== movieId); // Exclude the movie being replaced
+    
+    // Also exclude all previously replaced movies in this slot to prevent toggling
+    const allExcludedIds = [...usedMovieIds, ...previouslyReplacedIds];
+    
     // Find a suitable replacement from the available movies
-    const replacement = findReplacementMovie(movieToReplace, movies, usedMovieIds);
+    const replacement = findReplacementMovie(movieToReplace, movies, allExcludedIds, movieId);
     
     if (replacement) {
       // Create updated combination
@@ -394,6 +410,12 @@ export default function Home() {
         totalRuntime,
         averageRating,
       };
+      
+      // Update replacement history: add the movie that was just replaced to the history
+      const newHistory = new Map(replacementHistory);
+      const currentHistory = newHistory.get(historyKey) || [];
+      newHistory.set(historyKey, [...currentHistory, movieId]);
+      setReplacementHistory(newHistory);
       
       setMovieCombinations(updatedCombinations);
     } else {

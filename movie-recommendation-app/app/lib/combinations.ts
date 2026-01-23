@@ -47,8 +47,20 @@ export function generateCombinationsPerProvider(
     console.log(`Found ${providerMovies.length} unused movies available on ${providerId} (looking for provider ID: "${String(tmdbProviderId)}")`);
     
     // If no movies match the provider filter, try using all unused movies
+    // This handles cases where a provider (e.g., Disney+) doesn't have movies for certain genres
     const unusedMovies = movies.filter(m => !globalUsedMovieIds.has(m.id));
-    const moviesToUse = providerMovies.length > 0 ? providerMovies : unusedMovies;
+    let moviesToUse = providerMovies.length > 0 ? providerMovies : unusedMovies;
+    
+    // If provider has no movies but we have unused movies, use them as fallback
+    // This ensures providers like Disney+ can still show suggestions even if they don't have
+    // movies matching the exact provider filter (e.g., Horror genre on Disney+)
+    // Note: This means the movie might not actually be on Disney+, but it matches other filters
+    if (providerMovies.length === 0 && unusedMovies.length > 0) {
+      console.log(`⚠️ Provider ${providerId} has no movies matching the provider filter. Using ${unusedMovies.length} unused movies as fallback (these may not be available on ${providerId}, but match other filters like genre/language).`);
+      moviesToUse = unusedMovies;
+    } else if (providerMovies.length === 0 && unusedMovies.length === 0) {
+      console.log(`❌ No unused movies available for provider ${providerId}. All movies have been used in other combinations.`);
+    }
     
     if (moviesToUse.length > 0) {
       console.log(`Generating combinations from ${moviesToUse.length} unused movies for ${providerId}`);
@@ -216,11 +228,16 @@ export function getCombinationSummary(combination: MovieCombination): string {
 /**
  * Find a replacement movie for a given movie in a combination
  * Replacement should have similar runtime (±15 minutes)
+ * @param originalMovie - The movie to replace
+ * @param allMovies - All available movies to choose from
+ * @param usedMovieIds - Movie IDs already used in other combinations
+ * @param excludeMovieId - Additional movie ID to exclude (prevents toggling back to previous replacement)
  */
 export function findReplacementMovie(
   originalMovie: Movie,
   allMovies: Movie[],
-  usedMovieIds: number[]
+  usedMovieIds: number[],
+  excludeMovieId?: number
 ): Movie | null {
   const targetRuntime = originalMovie.runtime || 90; // Default to 90 minutes if no runtime
   const minRuntime = targetRuntime - REPLACEMENT_MARGIN_MINUTES;
@@ -229,11 +246,19 @@ export function findReplacementMovie(
   console.log(`Finding replacement for "${originalMovie.title}" (${targetRuntime}min)`);
   console.log(`Looking for movies between ${minRuntime}-${maxRuntime} minutes`);
   console.log(`Available movies: ${allMovies.length}, Used IDs: ${usedMovieIds.length}`);
+  if (excludeMovieId) {
+    console.log(`Excluding movie ID ${excludeMovieId} to prevent toggle`);
+  }
+  
+  // Create a set of all excluded IDs for faster lookup
+  const excludedIds = new Set([originalMovie.id, ...usedMovieIds]);
+  if (excludeMovieId) {
+    excludedIds.add(excludeMovieId);
+  }
   
   // Filter movies with similar runtime that aren't already used
   const candidates = allMovies.filter(m => 
-    m.id !== originalMovie.id &&
-    !usedMovieIds.includes(m.id) &&
+    !excludedIds.has(m.id) &&
     m.runtime &&
     m.runtime >= minRuntime &&
     m.runtime <= maxRuntime
@@ -249,8 +274,7 @@ export function findReplacementMovie(
     console.log(`No candidates found, trying wider range: ${widerMinRuntime}-${widerMaxRuntime} minutes`);
     
     const widerCandidates = allMovies.filter(m => 
-      m.id !== originalMovie.id &&
-      !usedMovieIds.includes(m.id) &&
+      !excludedIds.has(m.id) &&
       m.runtime &&
       m.runtime >= widerMinRuntime &&
       m.runtime <= widerMaxRuntime
@@ -259,15 +283,22 @@ export function findReplacementMovie(
     console.log(`Found ${widerCandidates.length} candidates with wider range`);
     
     if (widerCandidates.length > 0) {
-      const replacement = widerCandidates.sort((a, b) => b.vote_average - a.vote_average)[0];
+      // Sort by rating, but also add some randomness to avoid always picking the same one
+      const sorted = widerCandidates.sort((a, b) => b.vote_average - a.vote_average);
+      // Pick from top 3 candidates to add variety
+      const topCandidates = sorted.slice(0, Math.min(3, sorted.length));
+      const replacement = topCandidates[Math.floor(Math.random() * topCandidates.length)];
       console.log(`Selected replacement: "${replacement.title}" (${replacement.runtime}min)`);
       return replacement;
     }
   }
   
-  // Sort by rating and return the best one
+  // Sort by rating and return the best one, but add some randomness
   if (candidates.length > 0) {
-    const replacement = candidates.sort((a, b) => b.vote_average - a.vote_average)[0];
+    const sorted = candidates.sort((a, b) => b.vote_average - a.vote_average);
+    // Pick from top 3 candidates to add variety and prevent toggling
+    const topCandidates = sorted.slice(0, Math.min(3, sorted.length));
+    const replacement = topCandidates[Math.floor(Math.random() * topCandidates.length)];
     console.log(`Selected replacement: "${replacement.title}" (${replacement.runtime}min)`);
     return replacement;
   }
