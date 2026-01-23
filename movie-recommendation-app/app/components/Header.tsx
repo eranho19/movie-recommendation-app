@@ -1,6 +1,7 @@
 'use client';
 
 import { Film } from 'lucide-react';
+import AuthButton from './AuthButton';
 
 export default function Header() {
   return (
@@ -25,6 +26,7 @@ export default function Header() {
               <span className="text-imdb-bg font-bold text-lg">IMDb</span>
               <span className="text-imdb-bg text-sm">Style</span>
             </div>
+            <AuthButton />
           </div>
         </div>
       </div>
