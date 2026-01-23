@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from './contexts/AuthContext';
 import Header from './components/Header';
 import FilterPanel from './components/FilterPanel';
 import ViewToggle from './components/ViewToggle';
@@ -16,6 +18,8 @@ import { generateMovieCombinations, generateCombinationsPerProvider, findReplace
 import { shouldExcludeMovie } from './lib/storage';
 
 export default function Home() {
+  const router = useRouter();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [genres, setGenres] = useState<Genre[]>([]);
   const [movies, setMovies] = useState<MovieWithProvider[]>([]);
   const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
@@ -405,6 +409,27 @@ export default function Home() {
   };
 
   const isCombinationMode = filters.totalTime !== undefined && filters.totalTime > 0;
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, authLoading, router]);
+
+  // Show loading while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-imdb-bg flex items-center justify-center">
+        <LoadingAnimation />
+      </div>
+    );
+  }
+
+  // Don't render content if not authenticated
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-imdb-bg">
