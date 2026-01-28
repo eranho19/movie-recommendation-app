@@ -11,7 +11,7 @@ Use this checklist to ensure a smooth deployment to GitHub and Vercel.
 - [ ] `.env.local` file created with API key
 - [ ] Dependencies installed (`npm install`)
 - [ ] Application runs locally (`npm run dev`)
-- [ ] Tested on http://localhost:3000
+- [ ] Tested on http://localhost:4000
 - [ ] All features working:
   - [ ] Genre filter works
   - [ ] Genre-specific tags appear
@@ -80,7 +80,7 @@ git push -u origin main
 
 ### ✅ Project Configuration
 - [ ] Framework Preset: **Next.js** (auto-detected)
-- [ ] Root Directory: `./` (default)
+- [ ] Root Directory: `movie-recommendation-app` (the Next.js app lives in this subfolder)
 - [ ] Build Command: `npm run build` (default)
 - [ ] Output Directory: `.next` (default)
 - [ ] Install Command: `npm install` (default)
@@ -97,6 +97,16 @@ git push -u origin main
   - Name: `NEXT_PUBLIC_TMDB_BASE_URL`
   - Value: `https://api.themoviedb.org/3`
   - Environments: ✓ Production ✓ Preview ✓ Development
+
+- [ ] (Optional) Added Supabase variables:
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+- [ ] (Optional) Supabase Auth URL Configuration updated for production:
+  - Site URL: `https://your-project.vercel.app`
+  - Redirect URLs include:
+    - `https://your-project.vercel.app/auth/callback`
+    - (Optional) `https://your-project.vercel.app/auth/callback-handler`
 
 ### ✅ Deploy
 - [ ] Clicked "Deploy" button

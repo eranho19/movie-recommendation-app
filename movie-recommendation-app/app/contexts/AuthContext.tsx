@@ -8,7 +8,6 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<{ error: any }>;
   signUpWithEmail: (email: string, password: string) => Promise<{ error: any; data?: any }>;
   signOut: () => Promise<void>;
@@ -46,49 +45,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
-
-  const signInWithGoogle = async () => {
-    if (!supabase || !isSupabaseConfigured()) {
-      throw new Error('Supabase is not configured. Please check your environment variables.');
-    }
-
-    try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        },
-      });
-
-      if (error) {
-        console.error('Google OAuth Error:', error);
-        
-        // Provide specific error message for common issues
-        if (error.message?.includes('provider is not enabled') || error.message?.includes('Unsupported provider')) {
-          throw new Error(
-            'Google OAuth is not enabled in Supabase. Please enable it in Supabase Dashboard → Authentication → Providers → Google'
-          );
-        }
-        
-        throw new Error(
-          error.message || 
-          'Failed to sign in with Google. Please check that Google OAuth is enabled in Supabase and redirect URIs are configured correctly.'
-        );
-      }
-
-      // OAuth redirect happens automatically, no need to return data
-    } catch (err: any) {
-      console.error('Google Sign-In Error:', err);
-      if (err.message) {
-        throw err;
-      }
-      throw new Error('An unexpected error occurred during Google sign-in. Please try again.');
-    }
-  };
 
   const signInWithEmail = async (email: string, password: string) => {
     if (!supabase || !isSupabaseConfigured()) {
@@ -137,7 +93,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user,
     session,
     loading,
-    signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
     signOut,

@@ -17,14 +17,14 @@
 **Windows (PowerShell):**
 ```powershell
 cd movie-recommendation-app
-Copy-Item .env.local.example .env.local
+Copy-Item env.example .env.local
 notepad .env.local
 ```
 
 **Mac/Linux:**
 ```bash
 cd movie-recommendation-app
-cp .env.local.example .env.local
+cp env.example .env.local
 nano .env.local
 ```
 
@@ -44,7 +44,7 @@ npm run dev
 
 ### Step 4: Open in Browser
 
-Go to: *http://localhost:3000***
+Go to: *http://localhost:4000***
 
 ---
 
@@ -70,8 +70,8 @@ You should now see your movie recommendation site running!
 **Problem**: "Module not found" errors  
 **Solution**: Run `npm install` again
 
-**Problem**: Port 3000 already in use  
-**Solution**: Run `npm run dev -- -p 3001` to use port 3001 instead
+**Problem**: Port 4000 already in use  
+**Solution**: Run `npm run dev -- -p 4001` to use port 4001 instead
 
 ---
 

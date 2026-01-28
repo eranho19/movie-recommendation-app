@@ -22,7 +22,7 @@
 
 ```bash
 cd movie-recommendation-app
-copy .env.local.example .env.local
+copy env.example .env.local
 ```
 
 2. Edit `.env.local` and add your TMDB API key:
@@ -39,7 +39,7 @@ npm install
 npm run dev
 ```
 
-4. Open [http://localhost:3000](http://localhost:3000) and verify everything works
+4. Open [http://localhost:4000](http://localhost:4000) and verify everything works
 
 ---
 
@@ -97,7 +97,7 @@ git push -u origin main
 
 4. **Configure Project**
    - **Framework Preset**: Next.js (auto-detected)
-   - **Root Directory**: `./` (or `movie-recommendation-app` if it's in a subdirectory)
+   - **Root Directory**: `movie-recommendation-app` (this repo is a monorepo; the Next.js app lives in this subfolder)
    - **Build Command**: `npm run build` (default)
    - **Output Directory**: `.next` (default)
 
@@ -125,6 +125,20 @@ git push -u origin main
 7. Wait 2-3 minutes for deployment to complete
 
 8. Click on the deployment URL to view your live site! 🎉
+
+### Supabase Auth (Only if you're using Supabase)
+
+If you set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, configure Supabase so auth redirects work on your Vercel URL:
+
+1. In Supabase Dashboard → **Authentication** → **URL Configuration**
+2. Set **Site URL** to your production Vercel URL (e.g. `https://your-project.vercel.app`)
+3. Add **Redirect URLs** (at minimum):
+   - `https://your-project.vercel.app/auth/callback`
+   - (Optional but recommended) `https://your-project.vercel.app/auth/callback-handler`
+
+For local dev, keep these too:
+- `http://localhost:4000/auth/callback`
+- (Optional) `http://localhost:4000/auth/callback-handler`
 
 ### Method 2: Via Vercel CLI
 
