@@ -18,7 +18,7 @@ Your elegant movie recommendation website **"Let Me Set You Up"** is complete an
 2. **Set Up** (1 min)
    ```bash
    cd movie-recommendation-app
-   copy .env.local.example .env.local
+   copy env.example .env.local
    ```
    - Open `.env.local` in notepad
    - Replace `your_api_key_here` with your actual API key
@@ -30,11 +30,11 @@ Your elegant movie recommendation website **"Let Me Set You Up"** is complete an
    npm run dev
    ```
 
-4. **Open**: http://localhost:3000 🎉
+4. **Open**: http://localhost:4000 🎉
 
 ### Path B: Want to Deploy to the Web? (15 minutes)
 
-Follow the complete guide in `movie-recommendation-app/DEPLOYMENT.md`
+Follow the complete guide in `DEPLOYMENT.md`
 
 ---
 
@@ -93,7 +93,7 @@ Not sure where to look? Here's what each file contains:
 2. ✅ Add to `.env.local`
 3. ✅ Run `npm install`
 4. ✅ Run `npm run dev`
-5. ✅ Test at http://localhost:3000
+5. ✅ Test at http://localhost:4000
 
 ### This Week:
 1. ✅ Push to GitHub
@@ -119,6 +119,8 @@ A: Run `npm install` again. Make sure you're in the `movie-recommendation-app` f
 
 **Q: Port 3000 in use?**  
 A: Run `npm run dev -- -p 3001` to use port 3001 instead.
+
+**Note**: This project’s default dev server runs on port **4000** (see `movie-recommendation-app/package.json`).
 
 ### Documentation:
 - Setup issues → `QUICKSTART.md`
@@ -189,7 +191,7 @@ movie-recommendation-app/
 cd movie-recommendation-app
 
 # 2. Create environment file
-copy .env.local.example .env.local
+copy env.example .env.local
 
 # 3. Edit .env.local and add your TMDB API key
 notepad .env.local
@@ -200,7 +202,7 @@ npm install
 # 5. Run the development server
 npm run dev
 
-# 6. Open http://localhost:3000 in your browser
+# 6. Open http://localhost:4000 in your browser
 ```
 
 ---

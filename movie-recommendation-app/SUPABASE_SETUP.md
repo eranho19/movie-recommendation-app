@@ -173,7 +173,7 @@ initAuth();
 npm run dev
 ```
 
-2. Open your app at [http://localhost:3000](http://localhost:3000)
+2. Open your app at [http://localhost:4000](http://localhost:4000)
 
 3. Try marking a movie as watched
 
