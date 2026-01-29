@@ -145,13 +145,12 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
     index === self.findIndex(t => t.id === tag.id)
   );
 
-  const hasActiveFilters = 
-    filters.genres.length > 0 || 
-    filters.tags.length > 0 || 
-    filters.minScore > 0 || 
+  const hasActiveFilters =
+    filters.genres.length > 0 ||
+    filters.tags.length > 0 ||
+    filters.minScore > 0 ||
     filters.language !== 'all' ||
-    (filters.language === 'all' && filters.internationalLanguages && filters.internationalLanguages.length > 0) ||
-    (filters.language === 'international' && filters.internationalLanguages && filters.internationalLanguages.length > 0) ||
+    (filters.internationalLanguages?.length ?? 0) > 0 ||
     (filters.totalTime !== undefined && filters.totalTime > 0) ||
     filters.streamingProviders.length > 0 ||
     filters.fromYear !== undefined ||
