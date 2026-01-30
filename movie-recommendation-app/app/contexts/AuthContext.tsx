@@ -25,7 +25,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isSupabaseConfigured() || !supabase) {
+    const client = supabase;
+
+    if (!isSupabaseConfigured() || !client) {
       setLoading(false);
       return;
     }
@@ -35,11 +37,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const initAuth = async () => {
       try {
         // Get initial session
-        const { data: { session: existingSession }, error: sessionError } = await supabase.auth.getSession();
+        const { data: { session: existingSession }, error: sessionError } = await client.auth.getSession();
         if (!isMounted) return;
 
         if (sessionError) {
-          console.error('[AuthContext] Error getting session:', sessionError);
+          console.error('[AuthProvider] Error getting session:', sessionError);
         }
 
         if (existingSession) {
@@ -48,24 +50,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           // No session: try to create an anonymous session so we can persist watched movies to Supabase.
           // If Anonymous provider is not enabled in Supabase, this will fail and the app will fall back to localStorage.
-          console.log('[AuthContext] No session found, attempting anonymous sign-in...');
-          const { data, error } = await supabase.auth.signInAnonymously();
+          console.log('[AuthProvider] No session found, attempting anonymous sign-in...');
+          const { data, error } = await client.auth.signInAnonymously();
           if (!isMounted) return;
 
           if (error) {
-            console.error('[AuthContext] ❌ Anonymous sign-in failed:', error);
-            console.error('[AuthContext] 💡 TIP: Enable Anonymous auth in Supabase (Authentication → Providers → Anonymous)');
+            console.error('[AuthProvider] ❌ Anonymous sign-in failed:', error);
+            console.error('[AuthProvider] 💡 TIP: Enable Anonymous auth in Supabase (Authentication → Providers → Anonymous)');
             setSession(null);
             setUser(null);
           } else {
-            console.log('[AuthContext] ✅ Anonymous session created:', data.user?.id);
+            console.log('[AuthProvider] ✅ Anonymous session created:', data.user?.id);
             setSession(data.session ?? null);
             setUser(data.user ?? null);
           }
         }
       } catch (err) {
         if (!isMounted) return;
-        console.error('[AuthContext] ❌ Error initializing auth:', err);
+        console.error('[AuthProvider] ❌ Error initializing auth:', err);
         setSession(null);
         setUser(null);
       } finally {
@@ -87,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, newSession) => {
       if (!isMounted) return;
       setSession(newSession);
       setUser(newSession?.user ?? null);
