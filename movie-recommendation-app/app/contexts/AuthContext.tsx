@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { runAllTests, testSupabaseConnection, testSupabaseTable, testSupabaseWrite } from '../lib/supabase-debug';
 
 interface AuthContextType {
   user: User | null;
@@ -11,6 +12,8 @@ interface AuthContextType {
   signInWithEmail: (email: string, password: string) => Promise<{ error: any }>;
   signUpWithEmail: (email: string, password: string) => Promise<{ error: any; data?: any }>;
   signOut: () => Promise<void>;
+  // "Authenticated" here means a real (non-anonymous) user session.
+  // We still use anonymous sessions (when enabled) so we can persist watched movies to Supabase.
   isAuthenticated: boolean;
 }
 
@@ -22,28 +25,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isSupabaseConfigured() || !supabase) {
+    const client = supabase;
+
+    if (!isSupabaseConfigured() || !client) {
       setLoading(false);
       return;
     }
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    let isMounted = true;
+
+    const initAuth = async () => {
+      try {
+        // Get initial session
+        const { data: { session: existingSession }, error: sessionError } = await client.auth.getSession();
+        if (!isMounted) return;
+
+        if (sessionError) {
+          console.error('[AuthProvider] Error getting session:', sessionError);
+        }
+
+        if (existingSession) {
+          setSession(existingSession);
+          setUser(existingSession.user ?? null);
+        } else {
+          // No session: try to create an anonymous session so we can persist watched movies to Supabase.
+          // If Anonymous provider is not enabled in Supabase, this will fail and the app will fall back to localStorage.
+          console.log('[AuthProvider] No session found, attempting anonymous sign-in...');
+          const { data, error } = await client.auth.signInAnonymously();
+          if (!isMounted) return;
+
+          if (error) {
+            console.error('[AuthProvider] ❌ Anonymous sign-in failed:', error);
+            console.error('[AuthProvider] 💡 TIP: Enable Anonymous auth in Supabase (Authentication → Providers → Anonymous)');
+            setSession(null);
+            setUser(null);
+          } else {
+            console.log('[AuthProvider] ✅ Anonymous session created:', data.user?.id);
+            setSession(data.session ?? null);
+            setUser(data.user ?? null);
+          }
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('[AuthProvider] ❌ Error initializing auth:', err);
+        setSession(null);
+        setUser(null);
+      } finally {
+        if (!isMounted) return;
+        setLoading(false);
+
+        // Expose debug functions to window for easy testing (matches SUPABASE_TROUBLESHOOTING.md).
+        if (typeof window !== 'undefined') {
+          (window as any).testSupabase = {
+            runAll: runAllTests,
+            testConnection: testSupabaseConnection,
+            testTable: testSupabaseTable,
+            testWrite: testSupabaseWrite,
+          };
+        }
+      }
+    };
+
+    initAuth();
 
     // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, newSession) => {
+      if (!isMounted) return;
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithEmail = async (email: string, password: string) => {
@@ -96,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signInWithEmail,
     signUpWithEmail,
     signOut,
-    isAuthenticated: !!user,
+    isAuthenticated: !!user && !user.is_anonymous,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
