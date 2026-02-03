@@ -3,6 +3,20 @@ import { supabase, isSupabaseConfigured } from './supabase';
 
 const WATCHED_MOVIES_KEY = 'watched_movies';
 const TABLE_NAME = 'watched_movies';
+const WATCHED_CACHE_TTL_MS = 30_000;
+
+let watchedMoviesCache: { cacheKey: string; movies: WatchedMovie[]; fetchedAt: number } | null = null;
+let watchedMoviesInFlight: Promise<WatchedMovie[]> | null = null;
+
+function getCacheKey(userId: string | null, configured: boolean): string {
+  if (!configured) return 'local';
+  return `sb:${userId || 'anonymous'}`;
+}
+
+function invalidateWatchedCache() {
+  watchedMoviesCache = null;
+  watchedMoviesInFlight = null;
+}
 
 // Helper function to get user ID (you can customize this based on your auth setup)
 async function getUserId(): Promise<string | null> {
@@ -44,36 +58,58 @@ function saveWatchedMoviesToLocalStorage(movies: WatchedMovie[]): void {
 }
 
 export async function getWatchedMovies(): Promise<WatchedMovie[]> {
-  if (!isSupabaseConfigured()) {
-    return getWatchedMoviesFromLocalStorage();
+  // Serve from cache if fresh
+  const configured = isSupabaseConfigured();
+  const userId = configured ? await getUserId() : null;
+  const cacheKey = getCacheKey(userId, configured);
+  const now = Date.now();
+
+  if (watchedMoviesCache && watchedMoviesCache.cacheKey === cacheKey && (now - watchedMoviesCache.fetchedAt) < WATCHED_CACHE_TTL_MS) {
+    return watchedMoviesCache.movies;
   }
 
-  const userId = await getUserId();
-  if (!userId || !supabase) {
-    return getWatchedMoviesFromLocalStorage();
-  }
+  // Deduplicate concurrent calls
+  if (watchedMoviesInFlight) return watchedMoviesInFlight;
 
-  try {
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .eq('user_id', userId);
+  watchedMoviesInFlight = (async () => {
+    try {
+      if (!configured || !userId || !supabase) {
+        const local = getWatchedMoviesFromLocalStorage();
+        watchedMoviesCache = { cacheKey, movies: local, fetchedAt: Date.now() };
+        return local;
+      }
 
-    if (error) throw error;
+      const { data, error } = await supabase
+        .from(TABLE_NAME)
+        .select('*')
+        .eq('user_id', userId);
 
-    return data.map((row: any) => ({
-      id: row.movie_id,
-      watchedAt: row.watched_at,
-      mightWatchAgain: row.might_watch_again,
-    }));
-  } catch (error) {
-    console.error('Error reading watched movies from Supabase:', error);
-    return getWatchedMoviesFromLocalStorage();
-  }
+      if (error) throw error;
+
+      const mapped = data.map((row: any) => ({
+        id: row.movie_id,
+        watchedAt: row.watched_at,
+        mightWatchAgain: row.might_watch_again,
+      })) as WatchedMovie[];
+
+      watchedMoviesCache = { cacheKey, movies: mapped, fetchedAt: Date.now() };
+      return mapped;
+    } catch (error) {
+      console.error('Error reading watched movies from Supabase:', error);
+      const local = getWatchedMoviesFromLocalStorage();
+      watchedMoviesCache = { cacheKey, movies: local, fetchedAt: Date.now() };
+      return local;
+    } finally {
+      watchedMoviesInFlight = null;
+    }
+  })();
+
+  return watchedMoviesInFlight;
 }
 
 export async function markMovieAsWatched(movieId: number, mightWatchAgain: boolean = false): Promise<void> {
   console.log(`[markMovieAsWatched] Starting - movieId: ${movieId}, mightWatchAgain: ${mightWatchAgain}`);
+  invalidateWatchedCache();
   
   if (!isSupabaseConfigured()) {
     console.log('[markMovieAsWatched] Supabase not configured, using localStorage');
@@ -229,6 +265,7 @@ export async function markMovieAsWatched(movieId: number, mightWatchAgain: boole
 }
 
 export async function unmarkMovieAsWatched(movieId: number): Promise<void> {
+  invalidateWatchedCache();
   if (!isSupabaseConfigured() || !supabase) {
     const watched = getWatchedMoviesFromLocalStorage();
     const filtered = watched.filter(m => m.id !== movieId);

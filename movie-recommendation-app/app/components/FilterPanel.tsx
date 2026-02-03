@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Film, Tag, Star, Globe, X, Filter, Clock, Tv, Calendar, AlertCircle } from 'lucide-react';
-import type { Filters, Genre, LanguageOption } from '../types/movie';
-import { GENRE_TAGS, STREAMING_PROVIDERS, LANGUAGE_OPTIONS } from '../types/movie';
+import type { Filters, Genre, LanguageOption, MpaaRating } from '../types/movie';
+import { GENRE_TAGS, STREAMING_PROVIDERS, LANGUAGE_OPTIONS, MPAA_RATINGS_ORDER } from '../types/movie';
 import { playClickSound } from '../lib/sounds';
 
 interface FilterPanelProps {
@@ -64,6 +64,11 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
   const handleMinScoreChange = (value: number) => {
     playClickSound();
     onFilterChange({ ...filters, minScore: value });
+  };
+
+  const handleMaxMpaaRatingChange = (value: string) => {
+    playClickSound();
+    onFilterChange({ ...filters, maxMpaaRating: value === '' ? undefined : (value as MpaaRating) });
   };
 
   const handleLanguageChange = (language: 'english' | 'international' | 'all') => {
@@ -132,6 +137,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
       streamingProviders: [],
       fromYear: undefined,
       toYear: undefined,
+      maxMpaaRating: undefined,
     });
   };
 
@@ -154,7 +160,8 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
     (filters.totalTime !== undefined && filters.totalTime > 0) ||
     filters.streamingProviders.length > 0 ||
     filters.fromYear !== undefined ||
-    filters.toYear !== undefined;
+    filters.toYear !== undefined ||
+    filters.maxMpaaRating !== undefined;
 
   return (
     <div className="bg-imdb-surface border border-imdb-border rounded-lg p-4 md:p-6 mb-6">
@@ -285,6 +292,27 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
               Show movies with a minimum rating of {filters.minScore.toFixed(1)} stars
             </p>
           </div>
+        </div>
+
+        {/* Max MPAA Rating Filter */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <AlertCircle className="w-5 h-5 text-imdb-yellow" />
+            <h3 className="font-semibold text-imdb-text-primary">Max MPAA Rating (US)</h3>
+          </div>
+          <select
+            value={filters.maxMpaaRating ?? ''}
+            onChange={(e) => handleMaxMpaaRatingChange(e.target.value)}
+            className="w-full bg-imdb-bg border border-imdb-border text-imdb-text-primary rounded-md px-3 py-2 focus:outline-none focus:border-imdb-yellow transition-colors"
+          >
+            <option value="">Any</option>
+            {MPAA_RATINGS_ORDER.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+          <p className="text-xs text-imdb-text-secondary mt-2">
+            Limits results to movies rated up to the selected MPAA rating (unknown/unrated movies are excluded when this is set).
+          </p>
         </div>
 
         {/* Language Filter */}
