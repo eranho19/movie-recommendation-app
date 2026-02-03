@@ -12,10 +12,10 @@ import MoviePreviewModal from './components/MoviePreviewModal';
 import { AlertCircle, RefreshCw, Film, Star, Tv, Calendar } from 'lucide-react';
 import LoadingAnimation from './components/LoadingAnimation';
 import type { Movie, Filters, ViewMode, Genre, MovieCombination, MovieWithProvider } from './types/movie';
-import { STREAMING_PROVIDERS, LANGUAGE_OPTIONS } from './types/movie';
+import { STREAMING_PROVIDERS, LANGUAGE_OPTIONS, MPAA_RATINGS_ORDER } from './types/movie';
 import { getGenres, discoverMoviesWithProviders, getCombinedRating } from './lib/tmdb';
 import { generateMovieCombinations, generateCombinationsPerProvider, findReplacementMovie } from './lib/combinations';
-import { shouldExcludeMovie } from './lib/storage';
+import { getWatchedMovies } from './lib/storage';
 
 export default function Home() {
   const router = useRouter();
@@ -42,6 +42,7 @@ export default function Home() {
     streamingProviders: [],
     fromYear: undefined,
     toYear: undefined,
+    maxMpaaRating: undefined,
   });
 
   // Fetch genres on mount
@@ -107,7 +108,12 @@ export default function Home() {
 
         // Fetch movies with runtime and provider information
         console.log('Fetching with params:', params);
-        const moviesData = await discoverMoviesWithProviders(params, 150);
+        const moviesData = await discoverMoviesWithProviders(params, 150, {
+          // Provider lookups are expensive; only fetch when we actually need them (provider-based combinations)
+          includeProviders: (currentFilters.totalTime !== undefined && currentFilters.totalTime > 0) && currentFilters.streamingProviders.length > 0,
+          includeCertification: currentFilters.maxMpaaRating !== undefined,
+          concurrency: 8,
+        });
         console.log(`Fetched ${moviesData.length} movies from TMDB`);
         
         // Filter by language
@@ -184,12 +190,23 @@ export default function Home() {
           }
         }
         console.log(`After language filter: ${results.length} movies`);
+
+        // Filter by MPAA rating (US) - excludes unknown/unrated movies when enabled
+        if (currentFilters.maxMpaaRating) {
+          const maxIndex = MPAA_RATINGS_ORDER.indexOf(currentFilters.maxMpaaRating);
+          results = results.filter((movie: MovieWithProvider) => {
+            const cert = movie.certification;
+            if (!cert) return false;
+            const idx = MPAA_RATINGS_ORDER.indexOf(cert as any);
+            return idx !== -1 && idx <= maxIndex;
+          });
+          console.log(`After MPAA filter (<= ${currentFilters.maxMpaaRating}): ${results.length} movies`);
+        }
         
-        // Filter out watched movies (that aren't marked as rewatch)
-        const excludeChecks = await Promise.all(
-          results.map((movie: MovieWithProvider) => shouldExcludeMovie(movie.id))
-        );
-        results = results.filter((_, index) => !excludeChecks[index]);
+        // Filter out watched movies (that aren't marked as rewatch) - single fetch (avoid N+1)
+        const watched = await getWatchedMovies();
+        const excludeIds = new Set(watched.filter(w => !w.mightWatchAgain).map(w => w.id));
+        results = results.filter((movie: MovieWithProvider) => !excludeIds.has(movie.id));
         console.log(`After watched filter: ${results.length} movies`);
         
         // Remove duplicates based on movie ID (in case same movie appears multiple times)

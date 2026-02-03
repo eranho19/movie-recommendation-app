@@ -105,6 +105,57 @@ export async function getMovieDetails(movieId: number) {
   });
 }
 
+type BulkDetailsOptions = {
+  includeProviders?: boolean;
+  includeCertification?: boolean;
+  concurrency?: number;
+};
+
+function extractUsCertification(details: any): string | undefined {
+  const results = details?.release_dates?.results;
+  if (!Array.isArray(results)) return undefined;
+  const us = results.find((r: any) => r?.iso_3166_1 === 'US');
+  const releaseDates = us?.release_dates;
+  if (!Array.isArray(releaseDates)) return undefined;
+  const firstWithCert = releaseDates.find((rd: any) => typeof rd?.certification === 'string' && rd.certification.trim().length > 0);
+  const raw = firstWithCert?.certification?.trim();
+  if (!raw) return undefined;
+  const normalized = raw.toUpperCase().replace('PG13', 'PG-13');
+  // Only keep standard MPAA ratings we support for filtering.
+  if (['G', 'PG', 'PG-13', 'R', 'NC-17'].includes(normalized)) return normalized;
+  return undefined;
+}
+
+async function getMovieBulkDetails(movieId: number, includeCertification: boolean) {
+  if (includeCertification) {
+    return fetchFromTMDB(`/movie/${movieId}`, {
+      append_to_response: 'release_dates',
+    });
+  }
+  // No append_to_response for bulk fetch: smaller payload and faster.
+  return fetchFromTMDB(`/movie/${movieId}`);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const workers = new Array(Math.min(concurrency, items.length)).fill(0).map(async () => {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= items.length) break;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
 export async function getMovieVideos(movieId: number) {
   return fetchFromTMDB(`/movie/${movieId}/videos`);
 }
@@ -168,7 +219,7 @@ export async function discoverMoviesWithProviders(params: {
   watch_region?: string;
   'primary_release_date.gte'?: string;
   'primary_release_date.lte'?: string;
-}, limit: number = 100) {
+}, limit: number = 100, options: BulkDetailsOptions = {}) {
   // Fetch multiple pages to get enough movies
   const promises = [];
   const pagesToFetch = Math.ceil(limit / 20);
@@ -180,48 +231,49 @@ export async function discoverMoviesWithProviders(params: {
   const results = await Promise.all(promises);
   const allMovies = results.flatMap(r => r.results);
   
-  // Fetch runtime and provider info for each movie
-  const moviesWithInfo = [];
-  
-  for (let i = 0; i < Math.min(allMovies.length, limit); i++) {
+  const includeProviders = options.includeProviders !== false; // default true for backward compatibility
+  const includeCertification = options.includeCertification === true;
+  const concurrency = options.concurrency ?? 8;
+
+  // Fetch runtime (and optionally certification + providers) for each movie, concurrently
+  const slice = allMovies.slice(0, Math.min(allMovies.length, limit));
+  const moviesWithInfo = await mapWithConcurrency(slice, concurrency, async (movie, i) => {
     try {
       const [details, providers] = await Promise.all([
-        getMovieDetails(allMovies[i].id),
-        getMovieProviders(allMovies[i].id)
+        getMovieBulkDetails(movie.id, includeCertification),
+        includeProviders ? getMovieProviders(movie.id) : Promise.resolve(null),
       ]);
-      
+
+      const certification = includeCertification ? extractUsCertification(details) : undefined;
+
       // Get both flatrate (subscription) and free (ad-supported) providers
       // Tubi and other free services are in the 'free' array, not 'flatrate'
       // Convert to strings to match the type definition and enable proper comparison
       const flatrateProviders = providers?.flatrate?.map((p: any) => String(p.provider_id)) || [];
       const freeProviders = providers?.free?.map((p: any) => String(p.provider_id)) || [];
-      const availableOn = [...flatrateProviders, ...freeProviders];
-      
+      const availableOn = includeProviders ? [...flatrateProviders, ...freeProviders] : [];
+
       // Debug logging for provider data (only log first few to avoid spam)
-      if (i < 3 && availableOn.length > 0) {
-        console.log(`Movie "${allMovies[i].title}" available on providers:`, availableOn);
+      if (includeProviders && i < 3 && availableOn.length > 0) {
+        console.log(`Movie "${movie.title}" available on providers:`, availableOn);
       }
-      
-      moviesWithInfo.push({
-        ...allMovies[i],
+
+      return {
+        ...movie,
         runtime: details.runtime || 0,
+        ...(includeCertification ? { certification } : {}),
         availableOn,
-      });
-      
-      // Small delay to avoid rate limiting
-      if (i % 10 === 0 && i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      };
     } catch (error) {
-      console.error(`Error fetching info for movie ${allMovies[i].id}:`, error);
-      // Include movie without extra info
-      moviesWithInfo.push({
-        ...allMovies[i],
+      console.error(`Error fetching info for movie ${movie.id}:`, error);
+      return {
+        ...movie,
         runtime: 0,
+        ...(includeCertification ? { certification: undefined } : {}),
         availableOn: [],
-      });
+      };
     }
-  }
+  });
   
   return moviesWithInfo;
 }

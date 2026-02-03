@@ -14,6 +14,7 @@ export interface Movie {
   adult: boolean;
   video: boolean;
   runtime?: number; // Duration in minutes
+  certification?: string; // US MPAA rating when available (e.g., G, PG, PG-13, R, NC-17)
 }
 
 export interface Genre {
@@ -61,7 +62,11 @@ export interface Filters {
   streamingProviders: string[]; // Selected streaming providers
   fromYear?: number; // Starting year for release date filter
   toYear?: number; // Ending year for release date filter
+  maxMpaaRating?: MpaaRating; // Maximum allowed US MPAA rating
 }
+
+export const MPAA_RATINGS_ORDER = ['G', 'PG', 'PG-13', 'R', 'NC-17'] as const;
+export type MpaaRating = (typeof MPAA_RATINGS_ORDER)[number];
 
 export const LANGUAGE_OPTIONS: { id: LanguageOption; name: string; code: string }[] = [
   { id: 'spanish', name: 'Spanish', code: 'es' },
