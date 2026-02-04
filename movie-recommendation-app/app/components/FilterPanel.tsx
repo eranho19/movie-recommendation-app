@@ -11,9 +11,10 @@ interface FilterPanelProps {
   filters: Filters;
   onFilterChange: (filters: Filters) => void;
   onSuggest: () => void;
+  onClearAll?: () => void;
 }
 
-export default function FilterPanel({ genres, filters, onFilterChange, onSuggest }: FilterPanelProps) {
+export default function FilterPanel({ genres, filters, onFilterChange, onSuggest, onClearAll }: FilterPanelProps) {
   const [isOpen, setIsOpen] = useState(true);
   
   // Generate year options from 1920 to 2020 in 10-year increments, plus "Current"
@@ -139,6 +140,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
       toYear: undefined,
       maxMpaaRating: undefined,
     });
+    onClearAll?.();
   };
 
   // Get available tags based on selected genres

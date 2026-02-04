@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from './contexts/AuthContext';
 import Header from './components/Header';
@@ -9,17 +9,19 @@ import ViewToggle from './components/ViewToggle';
 import MovieCard from './components/MovieCard';
 import MovieCombinationCard from './components/MovieCombinationCard';
 import MoviePreviewModal from './components/MoviePreviewModal';
-import { AlertCircle, RefreshCw, Film, Star, Tv, Calendar } from 'lucide-react';
+import ExcludedMoviesPanel, { type ExcludedMovieEntry } from './components/ExcludedMoviesPanel';
+import { AlertCircle, RefreshCw, Film, Star, Tv, Calendar, EyeOff } from 'lucide-react';
 import LoadingAnimation from './components/LoadingAnimation';
 import type { Movie, Filters, ViewMode, Genre, MovieCombination, MovieWithProvider } from './types/movie';
 import { STREAMING_PROVIDERS, LANGUAGE_OPTIONS, MPAA_RATINGS_ORDER } from './types/movie';
-import { getGenres, discoverMoviesWithProviders, getCombinedRating } from './lib/tmdb';
+import { getGenres, discoverMoviesWithProviders, getCombinedRating, fetchFromTMDB } from './lib/tmdb';
 import { generateMovieCombinations, generateCombinationsPerProvider, findReplacementMovie } from './lib/combinations';
-import { getWatchedMovies } from './lib/storage';
+import { getWatchedMovies, unmarkMovieAsWatched } from './lib/storage';
 
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const searchRunIdRef = useRef(0);
   const [genres, setGenres] = useState<Genre[]>([]);
   const [movies, setMovies] = useState<MovieWithProvider[]>([]);
   const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
@@ -32,6 +34,12 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shouldFetchMovies, setShouldFetchMovies] = useState(false);
+  const [activeTab, setActiveTab] = useState<'recommendations' | 'excluded'>('recommendations');
+  const [watchedChangeTick, setWatchedChangeTick] = useState(0);
+  const [excludedCount, setExcludedCount] = useState(0);
+  const [excludedEntries, setExcludedEntries] = useState<ExcludedMovieEntry[]>([]);
+  const [excludedLoading, setExcludedLoading] = useState(false);
+  const [excludedError, setExcludedError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({
     genres: [],
     tags: [],
@@ -59,12 +67,102 @@ export default function Home() {
     fetchGenres();
   }, []);
 
+  // Keep excluded badge count up to date
+  useEffect(() => {
+    let cancelled = false;
+    const loadExcludedCount = async () => {
+      try {
+        // Avoid falling back to localStorage before auth initializes (common source of mismatched counts).
+        if (authLoading) return;
+        const watched = await getWatchedMovies();
+        const count = watched.filter(w => !w.mightWatchAgain).length;
+        if (!cancelled) setExcludedCount(count);
+      } catch (e) {
+        // Count is non-critical; ignore errors.
+      }
+    };
+    loadExcludedCount();
+    return () => {
+      cancelled = true;
+    };
+  }, [watchedChangeTick, authLoading, user?.id]);
+
+  // Load excluded movies only when tab is open (and refresh when watched changes)
+  useEffect(() => {
+    if (activeTab !== 'excluded') return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      setExcludedLoading(true);
+      setExcludedError(null);
+      try {
+        // Avoid fetching before auth is ready; otherwise storage falls back to localStorage and we never refresh.
+        if (authLoading) return;
+        const watched = await getWatchedMovies();
+        const excluded = watched
+          .filter(w => !w.mightWatchAgain)
+          .sort((a, b) => new Date(b.watchedAt).getTime() - new Date(a.watchedAt).getTime());
+
+        const watchedAtMap: Record<number, string | undefined> = {};
+        excluded.forEach(w => {
+          watchedAtMap[w.id] = w.watchedAt;
+        });
+
+        const ids = excluded.map(w => w.id);
+        if (ids.length === 0) {
+          if (!cancelled) {
+            setExcludedEntries([]);
+          }
+          return;
+        }
+
+        const concurrency = 6;
+        const results = new Array<ExcludedMovieEntry>(ids.length).fill(null as any);
+        let nextIndex = 0;
+
+        const workers = new Array(Math.min(concurrency, ids.length)).fill(0).map(async () => {
+          while (true) {
+            const i = nextIndex++;
+            if (i >= ids.length) break;
+            const id = ids[i];
+            try {
+              const details = await fetchFromTMDB(`/movie/${id}`);
+              results[i] = { id, watchedAt: watchedAtMap[id], movie: details as Movie };
+            } catch (e) {
+              console.error('Error fetching excluded movie details:', id, e);
+              results[i] = { id, watchedAt: watchedAtMap[id], loadError: true };
+            }
+          }
+        });
+
+        await Promise.all(workers);
+
+        if (!cancelled) {
+          setExcludedEntries(results);
+        }
+      } catch (e) {
+        console.error('Error loading excluded movies:', e);
+        if (!cancelled) setExcludedError('Failed to load excluded movies. Please try again.');
+      } finally {
+        if (!cancelled) setExcludedLoading(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, watchedChangeTick, authLoading, user?.id]);
+
   // Fetch movies only when suggest button is clicked
   useEffect(() => {
     if (!shouldFetchMovies) return;
     
     // Capture filters at the time of fetch to avoid race conditions
     const currentFilters = filters;
+    const runId = searchRunIdRef.current;
     
     const fetchMovies = async () => {
       setLoading(true);
@@ -276,6 +374,9 @@ export default function Home() {
           });
         }
 
+        // If a new search started (or we cleared results) while this was in-flight, ignore results.
+        if (runId !== searchRunIdRef.current) return;
+
         setMovies(sortedMovies);
         setFilteredMovies(sortedMovies);
         
@@ -307,18 +408,22 @@ export default function Home() {
           }
           
           console.log(`Final combinations count: ${combinations.length}`);
+          if (runId !== searchRunIdRef.current) return;
           setMovieCombinations(combinations);
           // Reset replacement history when new combinations are generated
           setReplacementHistory(new Map());
         } else {
+          if (runId !== searchRunIdRef.current) return;
           setMovieCombinations([]);
           setReplacementHistory(new Map());
         }
       } catch (err) {
         console.error('Error fetching movies:', err);
+        if (runId !== searchRunIdRef.current) return;
         setError('Failed to load movies. Please check your API key in .env.local file.');
         // Don't clear filters on error - preserve user selections
       } finally {
+        if (runId !== searchRunIdRef.current) return;
         setLoading(false);
         // Reset the fetch flag after completion (success or error)
         setShouldFetchMovies(false);
@@ -376,6 +481,7 @@ export default function Home() {
         }
       }
     }
+    setWatchedChangeTick(t => t + 1);
   };
 
   const handleRequestAnotherSearch = () => {
@@ -444,6 +550,7 @@ export default function Home() {
   const handleSuggestMovies = () => {
     // Reset error and ensure we fetch with current filters
     setError(null);
+    searchRunIdRef.current += 1;
     setShouldFetchMovies(true);
   };
 
@@ -460,27 +567,81 @@ export default function Home() {
           filters={filters}
           onFilterChange={handleFilterChange}
           onSuggest={handleSuggestMovies}
+          onClearAll={() => {
+            // Reset filters is handled inside FilterPanel via onFilterChange,
+            // this callback clears any previously suggested titles/results.
+            searchRunIdRef.current += 1; // invalidate any in-flight suggest request
+            setShouldFetchMovies(false);
+            setLoading(false);
+            setError(null);
+            setSelectedMovie(null);
+            setMovies([]);
+            setFilteredMovies([]);
+            setMovieCombinations([]);
+            setReplacementHistory(new Map());
+            setCombinationSeed(0);
+            setActiveTab('recommendations');
+          }}
         />
 
         {/* Results Header */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
           <div>
             <h2 className="text-2xl font-bold text-imdb-text-primary mb-1">
-              {loading 
-                ? 'Loading...' 
-                : isCombinationMode 
-                  ? `${movieCombinations.length} Movie Combination${movieCombinations.length !== 1 ? 's' : ''} Found`
-                  : `${filteredMovies.length} Movies Found`
+              {activeTab === 'excluded'
+                ? `${excludedCount} Movie${excludedCount !== 1 ? 's' : ''} in “Do Not Suggest Again”`
+                : (loading
+                    ? 'Loading...'
+                    : isCombinationMode
+                      ? `${movieCombinations.length} Movie Combination${movieCombinations.length !== 1 ? 's' : ''} Found`
+                      : `${filteredMovies.length} Movies Found`
+                  )
               }
             </h2>
             <p className="text-imdb-text-secondary text-sm">
-              {isCombinationMode 
-                ? `Combinations totaling ${filters.totalTime}h (±30 min) • Sorted by rating`
-                : 'Sorted by combined IMDB & Rotten Tomatoes scores'
+              {activeTab === 'excluded'
+                ? 'These are movies you marked as seen and asked us not to suggest again.'
+                : (isCombinationMode
+                    ? `Combinations totaling ${filters.totalTime}h (±30 min) • Sorted by rating`
+                    : 'Sorted by combined IMDB & Rotten Tomatoes scores'
+                  )
               }
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-imdb-surface border border-imdb-border rounded-lg p-1">
+              <button
+                onClick={() => setActiveTab('recommendations')}
+                className={`px-3 py-2 rounded-md text-sm font-bold transition-all ${
+                  activeTab === 'recommendations'
+                    ? 'bg-imdb-yellow text-imdb-bg'
+                    : 'text-imdb-text-secondary hover:text-imdb-yellow'
+                }`}
+                title="View recommendations"
+              >
+                Recommendations
+              </button>
+              <button
+                onClick={() => setActiveTab('excluded')}
+                className={`px-3 py-2 rounded-md text-sm font-bold transition-all inline-flex items-center gap-2 ${
+                  activeTab === 'excluded'
+                    ? 'bg-imdb-yellow text-imdb-bg'
+                    : 'text-imdb-text-secondary hover:text-imdb-yellow'
+                }`}
+                title="View movies marked as do not suggest again"
+              >
+                <EyeOff className="w-4 h-4" />
+                Do Not Suggest
+                {excludedCount > 0 && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    activeTab === 'excluded' ? 'bg-imdb-bg bg-opacity-20 text-imdb-bg' : 'bg-imdb-bg text-imdb-text-primary'
+                  }`}>
+                    {excludedCount}
+                  </span>
+                )}
+              </button>
+            </div>
+
             {isCombinationMode && movieCombinations.length > 0 && (
               <button
                 onClick={handleRequestAnotherSearch}
@@ -490,7 +651,9 @@ export default function Home() {
                 New Combinations
               </button>
             )}
-            {!isCombinationMode && <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />}
+            {activeTab !== 'excluded' && !isCombinationMode && (
+              <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
+            )}
           </div>
         </div>
 
@@ -518,6 +681,21 @@ export default function Home() {
         {loading && <LoadingAnimation />}
 
         {/* Movies Grid/List or Combinations */}
+        {activeTab === 'excluded' && (
+          <ExcludedMoviesPanel
+            entries={excludedEntries}
+            loading={excludedLoading}
+            error={excludedError}
+            onPreview={handlePreview}
+            onRemoveFromList={async (movieId) => {
+              await unmarkMovieAsWatched(movieId);
+              setWatchedChangeTick(t => t + 1);
+            }}
+          />
+        )}
+
+        {activeTab !== 'excluded' && (
+          <>
         {shouldFetchMovies && !loading && !error && isCombinationMode && movieCombinations.length === 0 && (
           <div className="text-center py-20 max-w-2xl mx-auto">
             <AlertCircle className="w-16 h-16 text-imdb-yellow mx-auto mb-4 opacity-50" />
@@ -676,6 +854,8 @@ export default function Home() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </main>
 
