@@ -17,20 +17,36 @@ interface FilterPanelProps {
 export default function FilterPanel({ genres, filters, onFilterChange, onSuggest, onClearAll }: FilterPanelProps) {
   const [isOpen, setIsOpen] = useState(true);
   
-  // Generate year options from 1920 to 2020 in 10-year increments, plus "Current"
   const currentYear = new Date().getFullYear();
-  const yearOptions: { label: string; value: number | 'current' }[] = [];
-  for (let year = 1920; year <= 2020; year += 10) {
-    yearOptions.push({
-      label: year.toString(),
-      value: year
-    });
-  }
-  // Add "Current" option which represents the current year
-  yearOptions.push({
-    label: 'Current',
-    value: 'current'
-  });
+
+  // Generate year options in 10-year increments, with the last option labeled "Current"
+  // (value is still 'current', which maps to the actual current year in handlers).
+  const YEAR_START = 1920;
+  const decadeFloor = (year: number) => Math.floor(year / 10) * 10;
+
+  const buildYearOptions = (startYear?: number): { label: string; value: number | 'current' }[] => {
+    const options: { label: string; value: number | 'current' }[] = [];
+    const effectiveStart = startYear ?? YEAR_START;
+
+    // If no start is provided, show decades from YEAR_START to the current decade.
+    // If start is provided, show that year and then jump in 10-year increments from there.
+    if (startYear === undefined) {
+      for (let year = YEAR_START; year <= decadeFloor(currentYear); year += 10) {
+        options.push({ label: year.toString(), value: year });
+      }
+    } else {
+      for (let year = effectiveStart; year <= currentYear; year += 10) {
+        options.push({ label: year.toString(), value: year });
+      }
+    }
+
+    // Always include a "Current" option that maps to the actual current year.
+    options.push({ label: 'Current', value: 'current' });
+    return options;
+  };
+
+  const fromYearOptions = buildYearOptions();
+  const toYearOptions = buildYearOptions(filters.fromYear);
 
   const handleGenreToggle = (genreId: number) => {
     playClickSound();
@@ -112,7 +128,8 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
       onFilterChange({ ...filters, fromYear: undefined });
     } else {
       const yearValue = value === 'current' ? currentYear : parseInt(value, 10);
-      onFilterChange({ ...filters, fromYear: yearValue });
+      // When "From" is selected, automatically set "To" to the same year.
+      onFilterChange({ ...filters, fromYear: yearValue, toYear: yearValue });
     }
   };
 
@@ -392,7 +409,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
                 className="w-full bg-imdb-bg border border-imdb-border text-imdb-text-primary rounded-md px-3 py-2 focus:outline-none focus:border-imdb-yellow transition-colors"
               >
                 <option value="">Any</option>
-                {yearOptions.map(option => (
+                {fromYearOptions.map(option => (
                   <option key={`from-${option.value}`} value={option.value.toString()}>
                     {option.label}
                   </option>
@@ -407,7 +424,7 @@ export default function FilterPanel({ genres, filters, onFilterChange, onSuggest
                 className="w-full bg-imdb-bg border border-imdb-border text-imdb-text-primary rounded-md px-3 py-2 focus:outline-none focus:border-imdb-yellow transition-colors"
               >
                 <option value="">Any</option>
-                {yearOptions.map(option => (
+                {toYearOptions.map(option => (
                   <option key={`to-${option.value}`} value={option.value.toString()}>
                     {option.label}
                   </option>
