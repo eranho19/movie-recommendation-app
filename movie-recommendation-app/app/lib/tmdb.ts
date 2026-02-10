@@ -39,12 +39,27 @@ export async function discoverMovies(params: {
   sort_by?: string;
   page?: number;
   with_watch_providers?: string;
+  with_watch_monetization_types?: string;
   watch_region?: string;
   'primary_release_date.gte'?: string;
   'primary_release_date.lte'?: string;
 }) {
+  // TMDB "watch providers" can be segmented by monetization types.
+  // If we filter by providers but don't specify monetization types, TMDB may effectively default to
+  // subscription ("flatrate"), which causes free/ad-supported providers like Tubi to return no results.
+  // Including flatrate + free + ads preserves the original behavior for subscription services while
+  // enabling free providers.
+  const normalizedParams = { ...params };
+  if (normalizedParams.with_watch_providers && !normalizedParams.with_watch_monetization_types) {
+    normalizedParams.with_watch_monetization_types = 'flatrate|free|ads';
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug(
+        '[tmdb] Auto-added with_watch_monetization_types=flatrate|free|ads to support free/ad-supported providers (e.g., Tubi).'
+      );
+    }
+  }
   return fetchFromTMDB('/discover/movie', {
-    ...params,
+    ...normalizedParams,
     include_adult: false,
     include_video: false,
     'vote_count.gte': 100, // Ensure movies have enough votes to be reliable
@@ -216,6 +231,7 @@ export async function discoverMoviesWithProviders(params: {
   sort_by?: string;
   page?: number;
   with_watch_providers?: string;
+  with_watch_monetization_types?: string;
   watch_region?: string;
   'primary_release_date.gte'?: string;
   'primary_release_date.lte'?: string;
