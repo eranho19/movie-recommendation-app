@@ -1,12 +1,22 @@
 'use client';
 
-import { Star, Calendar, Play, Award, Clock, Eye, EyeOff, RotateCcw, RefreshCcw, Info, X } from 'lucide-react';
+import { Star, Calendar, Award as AwardIcon, Clock, Eye, EyeOff, RefreshCcw, Info, X, User, Film, Trophy, Globe, Sparkles, MessageSquareText } from 'lucide-react';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
-import type { Movie } from '../types/movie';
-import { getPosterUrl, getCombinedRating } from '../lib/tmdb';
+import type { Award, Movie } from '../types/movie';
+import { getPosterUrl, getCombinedRating, getMovieAwards, getMovieDetails } from '../lib/tmdb';
 import { formatRuntime } from '../lib/combinations';
-import { isMovieWatched, markMovieAsWatched, unmarkMovieAsWatched } from '../lib/storage';
+import { isMovieWatched, markMovieAsWatched } from '../lib/storage';
+
+interface CrewMember {
+  name: string;
+  job: string;
+}
+
+interface CastMember {
+  name: string;
+  character?: string;
+}
 
 interface MovieCardProps {
   movie: Movie;
@@ -43,6 +53,17 @@ export default function MovieCard({
   });
   
   const [showInfoOverlay, setShowInfoOverlay] = useState(false);
+  const [infoLoading, setInfoLoading] = useState(false);
+  const [infoError, setInfoError] = useState<string | null>(null);
+  const [director, setDirector] = useState<string | null>(null);
+  const [cast, setCast] = useState<CastMember[]>([]);
+  const [awards, setAwards] = useState<Award[]>([]);
+
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewText, setReviewText] = useState<string | null>(null);
+  const [reviewHasSpoilers, setReviewHasSpoilers] = useState<boolean | null>(null);
+  const [showReviewCard, setShowReviewCard] = useState(false);
 
   useEffect(() => {
     const checkWatchedStatus = async () => {
@@ -55,6 +76,83 @@ export default function MovieCard({
     };
     checkWatchedStatus();
   }, [movie.id]);
+
+  useEffect(() => {
+    if (!showInfoOverlay) return;
+
+    let cancelled = false;
+    const run = async () => {
+      setInfoLoading(true);
+      setInfoError(null);
+      try {
+        const [details, movieAwards] = await Promise.all([
+          getMovieDetails(movie.id),
+          getMovieAwards(movie.id),
+        ]);
+
+        const directorInfo = details.credits?.crew?.find((member: CrewMember) => member.job === 'Director');
+        const topCast = (details.credits?.cast ?? []).slice(0, 5).map((c: any) => ({
+          name: c?.name,
+          character: c?.character,
+        })) as CastMember[];
+
+        if (!cancelled) {
+          setDirector(directorInfo?.name || null);
+          setCast(topCast);
+          setAwards(movieAwards ?? []);
+        }
+      } catch (e) {
+        console.error('Error fetching movie info overlay details:', e);
+        if (!cancelled) setInfoError('Could not load extra info. Please try again.');
+      } finally {
+        if (!cancelled) setInfoLoading(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [showInfoOverlay, movie.id]);
+
+  const getAwardDecoration = (awardName: string) => {
+    const name = awardName.toLowerCase();
+    if (name.includes('academy') || name.includes('oscar')) return { Icon: Trophy, label: 'Oscars' };
+    if (name.includes('golden globe')) return { Icon: Globe, label: 'Golden Globes' };
+    if (name.includes('bafta')) return { Icon: AwardIcon, label: 'BAFTA' };
+    if (name.includes('cannes')) return { Icon: Film, label: 'Cannes' };
+    if (name.includes('critically') || name.includes('acclaim')) return { Icon: Sparkles, label: 'Critically Acclaimed' };
+    return { Icon: AwardIcon, label: 'Award' };
+  };
+
+  const handleFetchReview = async (spoilers: boolean) => {
+    setReviewLoading(true);
+    setReviewError(null);
+    setReviewText(null);
+    setReviewHasSpoilers(spoilers);
+    setShowReviewCard(true);
+    try {
+      const res = await fetch('/api/movie-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ movieId: movie.id, spoilers, purpose: spoilers ? 'explained' : 'review' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || `Request failed (${res.status})`);
+      }
+      setReviewText(data?.review ?? 'No review available.');
+    } catch (e: any) {
+      console.error('Error fetching review:', e);
+      setReviewError(e?.message || 'Failed to generate review. Please try again.');
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleCloseReviewCard = () => {
+    setShowReviewCard(false);
+  };
 
   const handleMarkAsSeenNoRewatch = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -79,180 +177,322 @@ export default function MovieCard({
 
   if (viewMode === 'grid') {
     return (
-      <div className={`bg-imdb-surface border border-imdb-border rounded-lg overflow-hidden hover:border-imdb-yellow transition-all group ${compact ? '' : ''}`}>
-        <div 
-          className="relative aspect-[2/3] overflow-hidden"
-        >
-          <Image
-            src={posterUrl}
-            alt={movie.title}
-            fill
-            className="object-cover group-hover:scale-105 transition-transform"
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-          />
-          {!compact && (
-            <div className="absolute top-2 left-2 bg-imdb-bg bg-opacity-90 px-2 py-1 rounded-md z-10">
-              <span className="text-imdb-yellow font-bold text-lg">#{rank}</span>
+      <div className={`relative bg-imdb-surface border border-imdb-border rounded-lg overflow-hidden hover:border-imdb-yellow transition-all group ${compact ? '' : ''}`}>
+        {/* Base card content (hidden when overlay is open so nothing appears "below" it) */}
+        <div className={showInfoOverlay ? 'opacity-0 pointer-events-none select-none' : ''}>
+          <div className="relative aspect-[2/3] overflow-hidden">
+            <Image
+              src={posterUrl}
+              alt={movie.title}
+              fill
+              className="object-cover group-hover:scale-105 transition-transform"
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            />
+            {!compact && (
+              <div className="absolute top-2 left-2 bg-imdb-bg bg-opacity-90 px-2 py-1 rounded-md z-10">
+                <span className="text-imdb-yellow font-bold text-lg">#{rank}</span>
+              </div>
+            )}
+            <div className="absolute top-2 right-2 bg-imdb-bg bg-opacity-90 px-2 py-1 rounded-md flex items-center gap-1 z-10">
+              <Star className="w-4 h-4 text-imdb-yellow fill-imdb-yellow" />
+              <span className="text-imdb-text-primary font-bold">{combinedRating}</span>
             </div>
-          )}
-          <div className="absolute top-2 right-2 bg-imdb-bg bg-opacity-90 px-2 py-1 rounded-md flex items-center gap-1 z-10">
-            <Star className="w-4 h-4 text-imdb-yellow fill-imdb-yellow" />
-            <span className="text-imdb-text-primary font-bold">{combinedRating}</span>
+            {watchedStatus.watched && (
+              <div className="absolute top-12 right-2 bg-green-600 bg-opacity-90 px-2 py-1 rounded-md z-10">
+                <Eye className="w-4 h-4 text-white" />
+              </div>
+            )}
           </div>
-          {watchedStatus.watched && (
-            <div className="absolute top-12 right-2 bg-green-600 bg-opacity-90 px-2 py-1 rounded-md z-10">
-              <Eye className="w-4 h-4 text-white" />
+          <div className={compact ? "p-3" : "p-4"}>
+            <h3 className={`font-bold text-imdb-text-primary ${compact ? 'text-sm mb-1' : 'text-lg mb-2'} line-clamp-1`}>
+              {movie.title}
+            </h3>
+            <div className={`flex items-center gap-2 text-xs text-imdb-text-secondary mb-2 flex-wrap`}>
+              <div className="flex items-center gap-1">
+                <Calendar className="w-3 h-3" />
+                <span>{releaseYear}</span>
+              </div>
+              <span>•</span>
+              <div className="flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                <span>{runtime}</span>
+              </div>
+              {isAwardWorthy && (
+                <>
+                  <span>•</span>
+                  <div className="flex items-center gap-1 text-imdb-yellow" title="Award Winner">
+                    <AwardIcon className="w-3 h-3" />
+                  </div>
+                </>
+              )}
             </div>
-          )}
-          
-          {/* Info Overlay */}
-          {showInfoOverlay && (
-            <div className="absolute inset-0 bg-black bg-opacity-95 z-20 overflow-y-auto p-4 text-white">
+            {!compact && (
+              <p className="text-sm text-imdb-text-secondary line-clamp-3 mb-3">
+                {movie.overview}
+              </p>
+            )}
+            <div className="space-y-2">
+              {/* View Info Button */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setShowInfoOverlay(false);
+                  setShowInfoOverlay(true);
                 }}
-                className="absolute top-2 right-2 bg-imdb-yellow text-imdb-bg p-1 rounded-full hover:bg-yellow-500 transition-all"
-                title="Close"
+                className="w-full bg-imdb-border hover:bg-imdb-yellow hover:text-imdb-bg text-imdb-text-primary font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-2"
+                title="View movie details (synopsis, director, cast, awards)"
               >
-                <X className="w-4 h-4" />
+                <Info className="w-3 h-3" />
+                Movie Info
               </button>
               
-              <div className="text-xs space-y-2 mt-6">
-                <h4 className="font-bold text-sm text-imdb-yellow mb-2">{movie.title}</h4>
-                
-                <div>
-                  <span className="font-semibold">Synopsis:</span>
-                  <p className="text-gray-300 mt-1 text-[10px] leading-relaxed">
-                    {movie.overview || 'No synopsis available.'}
-                  </p>
+              {/* Two Separate Seen Buttons */}
+              {!watchedStatus.watched ? (
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleMarkAsSeenNoRewatch}
+                    className="w-full px-2 py-1.5 rounded text-xs font-medium transition-all flex items-center justify-center gap-1 bg-red-600 text-white hover:bg-red-700"
+                    title="Mark as seen and do not suggest again"
+                  >
+                    <EyeOff className="w-3 h-3" />
+                    Seen / Don't Suggest
+                  </button>
+                  <button
+                    onClick={handleMarkAsSeenMightRewatch}
+                    className="w-full px-2 py-1.5 rounded text-xs font-medium transition-all flex items-center justify-center gap-1 bg-green-600 text-white hover:bg-green-700"
+                    title="Seen but might want to watch again"
+                  >
+                    <Eye className="w-3 h-3" />
+                    Seen / Might Rewatch
+                  </button>
                 </div>
-                
-                <div>
-                  <span className="font-semibold">Language:</span>
-                  <span className="text-gray-300 ml-1">{movie.original_language?.toUpperCase()}</span>
+              ) : (
+                <div className={`w-full px-2 py-1.5 rounded text-xs font-medium text-center ${
+                  watchedStatus.mightWatchAgain 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-red-600 text-white'
+                }`}>
+                  {watchedStatus.mightWatchAgain ? '✓ Might Rewatch' : '✓ Won\'t Suggest'}
                 </div>
-                
-                <div>
-                  <span className="font-semibold">Year:</span>
-                  <span className="text-gray-300 ml-1">{releaseYear}</span>
-                </div>
-                
-                <div>
-                  <span className="font-semibold">Runtime:</span>
-                  <span className="text-gray-300 ml-1">{runtime}</span>
-                </div>
-                
-                {isAwardWorthy && (
-                  <div className="flex items-center gap-1 text-imdb-yellow">
-                    <Award className="w-3 h-3" />
-                    <span className="text-[10px]">Highly Rated (Award Worthy)</span>
-                  </div>
-                )}
-                
+              )}
+              
+              {/* Replace Movie Button (in combinations) */}
+              {showReplaceButton && onReplace && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowInfoOverlay(false);
-                    onPreview(movie);
+                    onReplace(movie.id);
                   }}
-                  className="w-full mt-2 bg-imdb-yellow text-imdb-bg py-1.5 rounded text-[10px] font-bold hover:bg-yellow-500 transition-all"
+                  className="w-full bg-imdb-yellow hover:bg-yellow-500 text-imdb-bg font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-2"
+                  title="Replace this movie with another suggestion"
                 >
-                  View Full Details
+                  <RefreshCcw className="w-3 h-3" />
+                  Replace Movie
                 </button>
-              </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
-        <div className={compact ? "p-3" : "p-4"}>
-          <h3 className={`font-bold text-imdb-text-primary ${compact ? 'text-sm mb-1' : 'text-lg mb-2'} line-clamp-1`}>
-            {movie.title}
-          </h3>
-          <div className={`flex items-center gap-2 text-xs text-imdb-text-secondary mb-2 flex-wrap`}>
-            <div className="flex items-center gap-1">
-              <Calendar className="w-3 h-3" />
-              <span>{releaseYear}</span>
-            </div>
-            <span>•</span>
-            <div className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              <span>{runtime}</span>
-            </div>
-            {isAwardWorthy && (
+
+        {/* Info Overlay (covers entire card: poster + details + buttons) */}
+        {showInfoOverlay && (
+          <div className="absolute inset-0 bg-black bg-opacity-95 z-50 flex flex-col text-white overflow-hidden min-h-0 pointer-events-auto">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowReviewCard(false);
+                setShowInfoOverlay(false);
+              }}
+              className="absolute top-2 right-2 bg-imdb-yellow text-imdb-bg p-1 rounded-full hover:bg-yellow-500 transition-all"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Review mode replaces Movie Info until closed/back */}
+            {showReviewCard ? (
               <>
-                <span>•</span>
-                <div className="flex items-center gap-1 text-imdb-yellow" title="Award Winner">
-                  <Award className="w-3 h-3" />
+                {/* Header (non-scroll) */}
+                <div className="px-4 pt-6 pb-3 flex-shrink-0">
+                  <div className="text-imdb-yellow font-bold text-sm truncate">
+                    {reviewHasSpoilers ? 'Movie explained (may include spoilers)' : 'Movie review (no spoilers)'}
+                  </div>
+                  <div className="text-xs text-gray-300 truncate">{movie.title}</div>
+                </div>
+
+                {/* Scrollable review */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+                  {reviewLoading && (
+                    <div className="text-xs text-gray-300">Gathering sources and writing…</div>
+                  )}
+                  {reviewError && <div className="text-xs text-red-300">{reviewError}</div>}
+                  {reviewText && (
+                    <div className="text-xs text-gray-200 whitespace-pre-wrap leading-relaxed">
+                      {reviewText}
+                    </div>
+                  )}
+                  {!reviewLoading && !reviewError && !reviewText && (
+                    <div className="text-xs text-gray-300">No review available.</div>
+                  )}
+                </div>
+
+                {/* Footer (fixed) */}
+                <div className="flex-shrink-0 px-4 pb-4 pt-3 border-t border-white/10 bg-black/90">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCloseReviewCard();
+                    }}
+                    className="w-full bg-imdb-border hover:bg-imdb-yellow hover:text-imdb-bg text-imdb-text-primary font-bold py-2 px-3 rounded text-xs transition-all"
+                  >
+                    Back to Movie Info
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Header (non-scroll) */}
+                <div className="px-4 pt-6 pb-3 flex-shrink-0">
+                  <h4 className="font-bold text-sm text-imdb-yellow">{movie.title}</h4>
+                </div>
+
+                {/* Scrollable details */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+                  <div className="text-xs space-y-2">
+                    <div>
+                      <span className="font-semibold">Synopsis:</span>
+                      <p className="text-gray-300 mt-1 text-[10px] leading-relaxed">
+                        {movie.overview || 'No synopsis available.'}
+                      </p>
+                    </div>
+
+                    <div>
+                      <span className="font-semibold">Language:</span>
+                      <span className="text-gray-300 ml-1">{movie.original_language?.toUpperCase()}</span>
+                    </div>
+
+                    <div>
+                      <span className="font-semibold">Year:</span>
+                      <span className="text-gray-300 ml-1">{releaseYear}</span>
+                    </div>
+
+                    <div>
+                      <span className="font-semibold">Runtime:</span>
+                      <span className="text-gray-300 ml-1">{runtime}</span>
+                    </div>
+
+                    {/* Director + Cast + Awards */}
+                    {infoLoading ? (
+                      <div className="text-gray-300 text-[10px]">Loading director, cast, and awards…</div>
+                    ) : infoError ? (
+                      <div className="text-red-300 text-[10px]">{infoError}</div>
+                    ) : (
+                      <>
+                        {director && (
+                          <div className="flex items-start gap-2">
+                            <Film className="w-3 h-3 text-imdb-yellow mt-0.5" />
+                            <div>
+                              <span className="font-semibold">Director:</span>
+                              <span className="text-gray-300 ml-1">{director}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {cast.length > 0 && (
+                          <div className="flex items-start gap-2">
+                            <User className="w-3 h-3 text-imdb-yellow mt-0.5" />
+                            <div>
+                              <span className="font-semibold">Leading actors:</span>
+                              <ul className="text-gray-300 mt-1 text-[10px] space-y-0.5">
+                                {cast.map((actor, idx) => (
+                                  <li key={idx}>
+                                    <span className="text-white">{actor.name}</span>
+                                    {actor.character ? <span className="text-gray-400"> as {actor.character}</span> : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        )}
+
+                        {awards.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-1 text-imdb-yellow">
+                              <AwardIcon className="w-3 h-3" />
+                              <span className="text-[10px] font-semibold">Main awards</span>
+                            </div>
+                            <div className="mt-1 space-y-1">
+                              {awards.slice(0, 4).map((award, idx) => {
+                                const { Icon } = getAwardDecoration(award.name);
+                                return (
+                                  <div key={idx} className="flex items-center gap-2 text-[10px] text-gray-300">
+                                    <Icon className="w-3 h-3 text-imdb-yellow" />
+                                    <span>{award.name}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {isAwardWorthy && (
+                      <div className="flex items-center gap-1 text-imdb-yellow">
+                        <AwardIcon className="w-3 h-3" />
+                        <span className="text-[10px]">Highly Rated (Award Worthy)</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer (fixed buttons) */}
+                <div className="flex-shrink-0 px-4 pb-4 pt-3 border-t border-white/10 bg-black/90">
+                  <div className="text-xs space-y-2">
+                    <div className="flex items-center gap-2 text-imdb-yellow">
+                      <MessageSquareText className="w-3 h-3" />
+                      <span className="text-[10px] font-semibold">Movie reviews (web-based)</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleFetchReview(true);
+                        }}
+                        className="w-full bg-red-600 text-white py-1.5 rounded text-[10px] font-bold hover:bg-red-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        title="Explains the movie and may include spoilers"
+                        disabled={reviewLoading}
+                      >
+                        Movie explained (may include spoilers)
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleFetchReview(false);
+                        }}
+                        className="w-full bg-imdb-border text-white py-1.5 rounded text-[10px] font-bold hover:bg-imdb-yellow hover:text-imdb-bg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        title="Generates a spoiler-free review by gathering info from the web"
+                        disabled={reviewLoading}
+                      >
+                        Movie review without spoilers
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowInfoOverlay(false);
+                        onPreview(movie);
+                      }}
+                      className="w-full mt-2 bg-imdb-yellow text-imdb-bg py-1.5 rounded text-[10px] font-bold hover:bg-yellow-500 transition-all"
+                    >
+                      View Full Details
+                    </button>
+                  </div>
                 </div>
               </>
             )}
           </div>
-          {!compact && (
-            <p className="text-sm text-imdb-text-secondary line-clamp-3 mb-3">
-              {movie.overview}
-            </p>
-          )}
-          <div className="space-y-2">
-            {/* View Info Button */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowInfoOverlay(true);
-              }}
-              className="w-full bg-imdb-border hover:bg-imdb-yellow hover:text-imdb-bg text-imdb-text-primary font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-2"
-              title="View movie details (synopsis, director, cast, awards)"
-            >
-              <Info className="w-3 h-3" />
-              Movie Info
-            </button>
-            
-            {/* Two Separate Seen Buttons */}
-            {!watchedStatus.watched ? (
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={handleMarkAsSeenNoRewatch}
-                  className="w-full px-2 py-1.5 rounded text-xs font-medium transition-all flex items-center justify-center gap-1 bg-red-600 text-white hover:bg-red-700"
-                  title="Mark as seen and do not suggest again"
-                >
-                  <EyeOff className="w-3 h-3" />
-                  Seen / Don't Suggest
-                </button>
-                <button
-                  onClick={handleMarkAsSeenMightRewatch}
-                  className="w-full px-2 py-1.5 rounded text-xs font-medium transition-all flex items-center justify-center gap-1 bg-green-600 text-white hover:bg-green-700"
-                  title="Seen but might want to watch again"
-                >
-                  <Eye className="w-3 h-3" />
-                  Seen / Might Rewatch
-                </button>
-              </div>
-            ) : (
-              <div className={`w-full px-2 py-1.5 rounded text-xs font-medium text-center ${
-                watchedStatus.mightWatchAgain 
-                  ? 'bg-green-600 text-white' 
-                  : 'bg-red-600 text-white'
-              }`}>
-                {watchedStatus.mightWatchAgain ? '✓ Might Rewatch' : '✓ Won\'t Suggest'}
-              </div>
-            )}
-            
-            {/* Replace Movie Button (in combinations) */}
-            {showReplaceButton && onReplace && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReplace(movie.id);
-                }}
-                className="w-full bg-imdb-yellow hover:bg-yellow-500 text-imdb-bg font-bold py-2 px-3 rounded text-xs transition-all flex items-center justify-center gap-2"
-                title="Replace this movie with another suggestion"
-              >
-                <RefreshCcw className="w-3 h-3" />
-                Replace Movie
-              </button>
-            )}
-          </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -317,7 +557,7 @@ export default function MovieCard({
                 <>
                   <span>•</span>
                   <div className="flex items-center gap-1 text-imdb-yellow" title="Award Winner">
-                    <Award className="w-4 h-4" />
+                  <AwardIcon className="w-4 h-4" />
                     <span className="text-xs">Award Winner</span>
                   </div>
                 </>
