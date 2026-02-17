@@ -14,7 +14,7 @@ import { AlertCircle, RefreshCw, Film, Star, Tv, Calendar, EyeOff } from 'lucide
 import LoadingAnimation from './components/LoadingAnimation';
 import type { Movie, Filters, ViewMode, Genre, MovieCombination, MovieWithProvider } from './types/movie';
 import { STREAMING_PROVIDERS, LANGUAGE_OPTIONS, MPAA_RATINGS_ORDER } from './types/movie';
-import { getGenres, discoverMoviesWithProviders, getCombinedRating, fetchFromTMDB } from './lib/tmdb';
+import { getGenres, discoverMoviesWithProviders, getCombinedRating, fetchFromTMDB, getKeywordIdsForTags } from './lib/tmdb';
 import { generateMovieCombinations, generateCombinationsPerProvider, findReplacementMovie } from './lib/combinations';
 import { getWatchedMovies, unmarkMovieAsWatched } from './lib/storage';
 
@@ -22,6 +22,8 @@ export default function Home() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const searchRunIdRef = useRef(0);
+  // Session-only history of suggested movies, used to prevent repeats across "New Combinations" clicks.
+  const suggestedMovieIdsRef = useRef<Set<number>>(new Set());
   const [genres, setGenres] = useState<Genre[]>([]);
   const [movies, setMovies] = useState<MovieWithProvider[]>([]);
   const [filteredMovies, setFilteredMovies] = useState<Movie[]>([]);
@@ -179,6 +181,21 @@ export default function Home() {
           params.with_genres = currentFilters.genres.join(',');
         }
 
+        // Apply genre-specific tags via TMDB keywords (best-effort).
+        // Uses OR semantics across selected tags to avoid over-constraining results.
+        if (currentFilters.tags.length > 0) {
+          try {
+            const keywordIds = await getKeywordIdsForTags(currentFilters.tags);
+            if (keywordIds.length > 0) {
+              params.with_keywords = keywordIds.join('|');
+            } else {
+              console.warn('[filters] No TMDB keyword IDs resolved for tags:', currentFilters.tags);
+            }
+          } catch (e) {
+            console.warn('[filters] Failed resolving tag keyword IDs:', e);
+          }
+        }
+
         // Add language filter - International means NOT English
         if (currentFilters.language === 'english') {
           params.with_original_language = 'en';
@@ -204,13 +221,20 @@ export default function Home() {
           params['primary_release_date.lte'] = `${currentFilters.toYear}-12-31`;
         }
 
-        // Fetch movies with runtime and provider information
+        // Fetch movies with runtime and provider information.
+        // In combination mode we intentionally fetch a larger pool (more pages) so "New Combinations"
+        // can keep producing non-repeating combinations within the same session.
+        const isCombinationFetch = currentFilters.totalTime !== undefined && currentFilters.totalTime > 0;
+        const fetchLimit = isCombinationFetch ? 260 : 150;
+        const maxPages = isCombinationFetch ? 8 : 5;
+
         console.log('Fetching with params:', params);
-        const moviesData = await discoverMoviesWithProviders(params, 150, {
+        const moviesData = await discoverMoviesWithProviders(params, fetchLimit, {
           // Provider lookups are expensive; only fetch when we actually need them (provider-based combinations)
           includeProviders: (currentFilters.totalTime !== undefined && currentFilters.totalTime > 0) && currentFilters.streamingProviders.length > 0,
           includeCertification: currentFilters.maxMpaaRating !== undefined,
           concurrency: 8,
+          maxPages,
         });
         console.log(`Fetched ${moviesData.length} movies from TMDB`);
         
@@ -385,6 +409,9 @@ export default function Home() {
           let combinations: MovieCombination[] = [];
           
           console.log(`Generating combinations for ${currentFilters.totalTime} hours from ${sortedMovies.length} movies`);
+
+          // Exclude movies already suggested in this session to avoid repeats across "New Combinations".
+          const sessionFreshPool = sortedMovies.filter((m: any) => !suggestedMovieIdsRef.current.has(m.id));
           
           if (currentFilters.streamingProviders.length > 0) {
             // Generate 3 combinations per provider
@@ -397,19 +424,22 @@ export default function Home() {
             });
             console.log('Provider map:', providerMap);
             combinations = generateCombinationsPerProvider(
-              sortedMovies,
+              sessionFreshPool as any,
               currentFilters.totalTime,
               currentFilters.streamingProviders,
-              providerMap
+              providerMap,
+              combinationSeed
             );
           } else {
             // Generate 5 general combinations
-            combinations = generateMovieCombinations(sortedMovies, currentFilters.totalTime, 5);
+            combinations = generateMovieCombinations(sessionFreshPool, currentFilters.totalTime, 5, combinationSeed);
           }
           
           console.log(`Final combinations count: ${combinations.length}`);
           if (runId !== searchRunIdRef.current) return;
           setMovieCombinations(combinations);
+          // Track suggested movies for this session to prevent repeats on subsequent "New Combinations".
+          combinations.forEach(combo => combo.movies.forEach(m => suggestedMovieIdsRef.current.add(m.id)));
           // Reset replacement history when new combinations are generated
           setReplacementHistory(new Map());
         } else {
@@ -485,8 +515,50 @@ export default function Home() {
   };
 
   const handleRequestAnotherSearch = () => {
-    // Increment seed to trigger new combinations without changing filters
-    setCombinationSeed(prev => prev + 1);
+    // Generate a fresh set of combinations without refetching.
+    // Previously this only bumped `combinationSeed`, but the fetch effect is gated by `shouldFetchMovies`,
+    // so nothing regenerated.
+    setCombinationSeed(prev => {
+      const nextSeed = prev + 1;
+      try {
+        if (filters.totalTime && filters.totalTime > 0) {
+          let combinations: MovieCombination[] = [];
+
+          // Exclude movies already suggested in this session to avoid repeats.
+          const sessionFreshPool = (filteredMovies as any[]).filter(m => !suggestedMovieIdsRef.current.has(m.id));
+
+          if (filters.streamingProviders.length > 0) {
+            const providerMap: { [id: string]: number } = {};
+            filters.streamingProviders.forEach(id => {
+              const provider = STREAMING_PROVIDERS.find(p => p.id === id);
+              if (provider) providerMap[id] = provider.tmdbId;
+            });
+
+            combinations = generateCombinationsPerProvider(
+              sessionFreshPool as any,
+              filters.totalTime,
+              filters.streamingProviders,
+              providerMap,
+              nextSeed
+            );
+          } else {
+            combinations = generateMovieCombinations(sessionFreshPool as any, filters.totalTime, 5, nextSeed);
+          }
+
+          if (combinations.length === 0) {
+            alert('No new combinations available without repeating movies in this session. Try widening filters or starting a new session.');
+            return prev; // keep current seed + combinations unchanged
+          }
+
+          setMovieCombinations(combinations);
+          combinations.forEach(combo => combo.movies.forEach(m => suggestedMovieIdsRef.current.add(m.id)));
+          setReplacementHistory(new Map());
+        }
+      } catch (e) {
+        console.warn('Failed to regenerate combinations:', e);
+      }
+      return nextSeed;
+    });
   };
 
   const handleReplaceMovie = (combinationIndex: number, movieId: number) => {

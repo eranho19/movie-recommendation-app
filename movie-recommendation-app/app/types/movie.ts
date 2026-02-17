@@ -193,5 +193,12 @@ export const GENRE_TAGS: Record<string, { id: string; name: string; description:
     { id: 'epic-quest', name: 'Epic Quest', description: 'Hero\'s journey' },
     { id: 'dark-fantasy', name: 'Dark Fantasy', description: 'Grim and dark' },
   ],
+  // Music (10402)
+  '10402': [
+    { id: 'live-concert', name: 'Live Concert', description: 'Concert film / live performance' },
+    { id: 'musical', name: 'Musical', description: 'Singing & dance as storytelling' },
+    { id: 'music-theme', name: 'Music Theme', description: 'Music-centric plot or setting' },
+    { id: 'artist-biography', name: 'Artist Biography', description: 'Musician/band biopic' },
+  ],
 };
 

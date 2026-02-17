@@ -16,7 +16,8 @@ export function generateCombinationsPerProvider(
   movies: MovieWithProvider[],
   targetHours: number,
   providers: string[],
-  providerMap: { [id: string]: number }
+  providerMap: { [id: string]: number },
+  seed?: number
 ): MovieCombination[] {
   const allCombinations: MovieCombination[] = [];
   const globalUsedMovieIds = new Set<number>(); // Track movies used across ALL providers
@@ -64,7 +65,9 @@ export function generateCombinationsPerProvider(
     
     if (moviesToUse.length > 0) {
       console.log(`Generating combinations from ${moviesToUse.length} unused movies for ${providerId}`);
-      const combinations = generateMovieCombinations(moviesToUse, targetHours, 3);
+      // Slightly vary seed per provider so each provider gets different combos on the same "New Combinations" click.
+      const providerSeed = typeof seed === 'number' ? seed + tmdbProviderId : undefined;
+      const combinations = generateMovieCombinations(moviesToUse, targetHours, 3, providerSeed);
       console.log(`Generated ${combinations.length} combinations for ${providerId}`);
       
       // Tag combinations with provider and track used movie IDs globally
@@ -90,7 +93,8 @@ export function generateCombinationsPerProvider(
 export function generateMovieCombinations(
   movies: Movie[],
   targetHours: number,
-  count: number = 5
+  count: number = 5,
+  seed?: number
 ): MovieCombination[] {
   const targetMinutes = targetHours * 60;
   const minTime = targetMinutes - MARGIN_MINUTES;
@@ -115,21 +119,45 @@ export function generateMovieCombinations(
   // Sort by score (considers time accuracy and rating)
   allCombinations.sort((a, b) => b.score - a.score);
   
-  // Return top combinations, ensuring NO duplicate movies across combinations
+  // Return combinations, ensuring NO duplicate movies across combinations.
+  // When seed is provided, pick combinations with a "diversity window" so repeated clicks can produce new sets.
   const selected: MovieCombination[] = [];
   const usedMovieIds = new Set<number>();
-  
-  for (const item of allCombinations) {
-    if (selected.length >= count) break;
-    
-    // Check if this combination uses any movies already used in previous combinations
-    const hasOverlap = item.combination.movies.some(m => usedMovieIds.has(m.id));
-    
-    // Only select combinations with NO overlapping movies
-    if (!hasOverlap) {
-      selected.push(item.combination);
-      item.combination.movies.forEach(m => usedMovieIds.add(m.id));
+
+  const useSeededDiversity = typeof seed === 'number' && Number.isFinite(seed);
+  const diversityWindow = 30;
+
+  const mulberry32 = (a: number) => {
+    return () => {
+      let t = (a += 0x6D2B79F5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  const rand = useSeededDiversity ? mulberry32(seed as number) : null;
+
+  while (selected.length < count) {
+    // Gather candidates that don't overlap.
+    const candidates: CombinationWithScore[] = [];
+    for (const item of allCombinations) {
+      if (candidates.length >= (useSeededDiversity ? diversityWindow : 1)) break;
+      const hasOverlap = item.combination.movies.some(m => usedMovieIds.has(m.id));
+      if (!hasOverlap) candidates.push(item);
     }
+
+    if (candidates.length === 0) break;
+
+    const chosen = useSeededDiversity && rand
+      ? candidates[Math.floor(rand() * candidates.length)]
+      : candidates[0];
+
+    selected.push(chosen.combination);
+    chosen.combination.movies.forEach(m => usedMovieIds.add(m.id));
+
+    // Remove chosen from pool so we don't pick it again.
+    const idx = allCombinations.indexOf(chosen);
+    if (idx !== -1) allCombinations.splice(idx, 1);
   }
   
   return selected;

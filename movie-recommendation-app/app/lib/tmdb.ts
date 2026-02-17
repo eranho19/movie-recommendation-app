@@ -34,6 +34,7 @@ export async function getGenres() {
 export async function discoverMovies(params: {
   with_genres?: string;
   with_original_language?: string;
+  with_keywords?: string;
   'vote_average.gte'?: number;
   'vote_average.lte'?: number;
   sort_by?: string;
@@ -124,6 +125,8 @@ type BulkDetailsOptions = {
   includeProviders?: boolean;
   includeCertification?: boolean;
   concurrency?: number;
+  maxPages?: number;
+  pageStart?: number;
 };
 
 function extractUsCertification(details: any): string | undefined {
@@ -183,6 +186,81 @@ export async function searchMovies(query: string, page: number = 1) {
   });
 }
 
+type KeywordSearchResult = { id: number; name: string };
+
+const keywordIdCache = new Map<string, number | null>();
+
+export async function searchKeyword(query: string): Promise<KeywordSearchResult | null> {
+  const data = await fetchFromTMDB('/search/keyword', { query, page: 1 });
+  const results: any[] = Array.isArray(data?.results) ? data.results : [];
+  const first = results[0];
+  if (!first || typeof first.id !== 'number') return null;
+  return { id: first.id, name: String(first.name ?? query) };
+}
+
+function tagIdToKeywordQuery(tagId: string): string {
+  const normalized = tagId.replace(/-/g, ' ').trim();
+  const overrides: Record<string, string> = {
+    // Horror
+    gore: 'gore',
+    psychological: 'psychological thriller',
+    supernatural: 'supernatural',
+    torture: 'torture',
+    revenge: 'revenge',
+    slasher: 'slasher',
+    // Comedy
+    mockumentary: 'mockumentary',
+    nonsense: 'absurd',
+    satire: 'satire',
+    slapstick: 'slapstick',
+    'dark-comedy': 'dark comedy',
+    'romantic-comedy': 'romantic comedy',
+    // Action
+    'martial-arts': 'martial arts',
+    explosions: 'explosion',
+    'car-chases': 'car chase',
+    superhero: 'superhero',
+    spy: 'spy',
+    war: 'war',
+    // Sci-Fi
+    space: 'space',
+    'time-travel': 'time travel',
+    dystopian: 'dystopia',
+    cyberpunk: 'cyberpunk',
+    alien: 'alien',
+    'post-apocalyptic': 'post apocalyptic',
+    // Music
+    'live-concert': 'concert film',
+    musical: 'musical',
+    'music-theme': 'music',
+    'artist-biography': 'musician',
+  };
+  return overrides[tagId] ?? normalized;
+}
+
+export async function getKeywordIdsForTags(tagIds: string[]): Promise<number[]> {
+  const ids: number[] = [];
+  for (const tagId of tagIds) {
+    const query = tagIdToKeywordQuery(tagId);
+    const cacheKey = query.toLowerCase();
+    if (keywordIdCache.has(cacheKey)) {
+      const cached = keywordIdCache.get(cacheKey);
+      if (typeof cached === 'number') ids.push(cached);
+      continue;
+    }
+    try {
+      const found = await searchKeyword(query);
+      const id = found?.id ?? null;
+      keywordIdCache.set(cacheKey, id);
+      if (typeof id === 'number') ids.push(id);
+    } catch (e) {
+      console.warn('[tmdb] keyword search failed for tag', tagId, e);
+      keywordIdCache.set(cacheKey, null);
+    }
+  }
+  return Array.from(new Set(ids));
+}
+
 export function getPosterUrl(posterPath: string | null, size: string = POSTER_SIZE): string {
   if (!posterPath) return '/placeholder-poster.jpg';
   return `${IMAGE_BASE_URL}/${size}${posterPath}`;
@@ -226,6 +304,7 @@ export async function getMovieProviders(movieId: number) {
 export async function discoverMoviesWithProviders(params: {
   with_genres?: string;
   with_original_language?: string;
+  with_keywords?: string;
   'vote_average.gte'?: number;
   'vote_average.lte'?: number;
   sort_by?: string;
@@ -239,8 +318,10 @@ export async function discoverMoviesWithProviders(params: {
   // Fetch multiple pages to get enough movies
   const promises = [];
   const pagesToFetch = Math.ceil(limit / 20);
+  const pageStart = options.pageStart ?? 1;
+  const maxPages = options.maxPages ?? 5;
   
-  for (let i = 1; i <= Math.min(pagesToFetch, 5); i++) {
+  for (let i = pageStart; i < pageStart + Math.min(pagesToFetch, maxPages); i++) {
     promises.push(discoverMovies({ ...params, page: i }));
   }
   
